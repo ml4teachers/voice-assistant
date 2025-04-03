@@ -44,19 +44,17 @@ async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Rem
 
 export async function createRealtimeConnection(
     audioElement: RefObject<HTMLAudioElement | null>,
-    // Accept ONLY tools configuration as argument
-    tools: Tool[]
-    // tool_resources: ToolResources | null // <-- REMOVED
+    tools: Tool[],
+    // Expect the MediaStream object as an argument
+    mediaStream: MediaStream 
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> {
-    // Pass ONLY tools configuration to fetchEphemeralKey
-    const ephemeralKey = await fetchEphemeralKey(tools); // Remove tool_resources argument
+    const ephemeralKey = await fetchEphemeralKey(tools);
     if (!ephemeralKey) {
         console.error("Failed to get ephemeral key.");
         return null;
     }
 
     let pc: RTCPeerConnection | null = null;
-    let mediaStream: MediaStream | null = null;
 
     try {
         pc = new RTCPeerConnection();
@@ -73,17 +71,17 @@ export async function createRealtimeConnection(
             }
         };
 
-        try {
-            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        // Add tracks from the provided mediaStream
+        if (mediaStream && mediaStream.getTracks().length > 0) {
             mediaStream.getTracks().forEach(track => {
                 if (pc) { // Check if pc still exists
-                    pc.addTrack(track, mediaStream!);
+                    pc.addTrack(track, mediaStream);
+                    console.log(`Track added from provided stream: ${track.kind}`);
                 }
             });
-            console.log("Microphone access granted and track added.");
-        } catch (err) {
-            console.error("Error getting user media:", err);
-            throw new Error("Microphone access denied or failed."); // Re-throw for connect function to catch
+        } else {
+             console.error("Provided mediaStream is invalid or has no tracks.");
+             throw new Error("Invalid media stream provided.");
         }
 
         const dc = pc.createDataChannel("oai-data-channel", { ordered: true });
@@ -126,9 +124,6 @@ export async function createRealtimeConnection(
     } catch (error) {
         console.error("Error during WebRTC setup:", error);
         // Cleanup resources on error
-        if (mediaStream) {
-            mediaStream.getTracks().forEach(track => track.stop());
-        }
         if (pc && pc.connectionState !== 'closed') {
             pc.close();
         }

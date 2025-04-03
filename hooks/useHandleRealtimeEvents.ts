@@ -5,6 +5,8 @@ import useConversationStore from "@/stores/useConversationStore";
 // If not, define a placeholder type here.
 import { Annotation } from "@/components/annotations";
 import useToolsStore from "@/stores/useToolsStore";
+import useSocraticStore from "@/stores/useSocraticStore"; // Import the new Socratic store
+import { getSocraticPromptForTopic } from '@/config/socratic-prompt'; // Import the prompt generator
 
 // --- Temporary Type Definitions (replace imports from @/lib/assistant) ---
 // Define placeholder types here. Refine or move to a central types file later.
@@ -106,21 +108,34 @@ const updateToolCallItem = (itemId: string, updates: Partial<FunctionCallItem>) 
 
 export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
+    // Get Socratic state (values will update automatically thanks to Zustand)
+    const {
+        isSocraticModeActive,
+        currentSocraticTopic,
+        retrievedSocraticContext,
+        socraticDialogueState,
+        setRetrievedSocraticContext,
+        setSocraticDialogueState,
+        setCurrentSocraticTopic // Add setter for topic if needed here
+    } = useSocraticStore();
+
     const executeToolFunction = useCallback(async (toolCall: ToolCall) => {
         const toolCallUiId = toolCall.item_id || `tool-${toolCall.call_id || Date.now()}`;
         console.log(`Executing tool: ${toolCall.name}`, toolCall.arguments);
 
-        // Add initial tool call item to UI (as FunctionCallItem initially)
-        addTranscriptItem({
-            type: "tool_call",
-            id: toolCallUiId,
-            tool_type: "function_call", // Keep this for initial display consistency?
-            status: "in_progress",
-            name: toolCall.name,
-            arguments: JSON.stringify(toolCall.arguments),
-            parsedArguments: toolCall.arguments,
-            call_id: toolCall.call_id,
-        } as FunctionCallItem);
+        // Add initial tool call item to UI (if not triggered internally for context)
+        if (!toolCall.call_id?.startsWith('socratic-ctx-')) { // Avoid showing internal context fetch in UI
+            addTranscriptItem({
+                type: "tool_call",
+                id: toolCallUiId,
+                tool_type: "function_call",
+                status: "in_progress",
+                name: toolCall.name,
+                arguments: JSON.stringify(toolCall.arguments),
+                parsedArguments: toolCall.arguments,
+                call_id: toolCall.call_id,
+            } as FunctionCallItem);
+        }
 
         let result: any;
         try {
@@ -137,64 +152,90 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             else if (toolCall.name === 'file_search_wrapper') {
                 console.log("File search wrapper function called:", toolCall.arguments);
                 const query = toolCall.arguments?.query;
+                const isSocraticContextFetch = toolCall.call_id?.startsWith('socratic-ctx-');
 
                 if (!query) {
                     result = { error: "Missing query for file search wrapper" };
                     console.error(result.error);
-                    updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                    if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                    // If Socratic context fetch failed, reset state?
+                    if (isSocraticContextFetch) setSocraticDialogueState('idle');
                 } else {
-                    // Update UI Status (still uses FunctionCallItem for display)
-                    updateToolCallItem(toolCallUiId, {
-                        status: "in_progress",
-                        parsedArguments: toolCall.arguments,
-                        output: JSON.stringify({ status: "calling backend wrapper...", query: query })
-                    });
+                    if (!isSocraticContextFetch) {
+                        updateToolCallItem(toolCallUiId, {
+                            status: "in_progress",
+                            parsedArguments: toolCall.arguments,
+                            output: JSON.stringify({ status: "calling backend wrapper...", query: query })
+                        });
+                    }
 
-                    // Get Vector Store ID from Zustand
                     const currentVectorStoreId = useToolsStore.getState().vectorStore?.id;
                     if (!currentVectorStoreId) {
                         result = { error: "No vector store configured in client state" };
                         console.error(result.error);
-                        updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                        if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                        if (isSocraticContextFetch) setSocraticDialogueState('idle');
                     } else {
-                        // Call the backend wrapper route
                         try {
                             const apiUrl = `/api/functions/file_search_wrapper?query=${encodeURIComponent(query)}&vectorStoreId=${encodeURIComponent(currentVectorStoreId)}`;
                             const backendResponse = await fetch(apiUrl);
                             if (!backendResponse.ok) {
-                                const errorText = await backendResponse.text().catch(() => 'Failed to read error text from backend wrapper');
+                                const errorText = await backendResponse.text().catch(() => 'Failed to read error text');
                                 throw new Error(`Backend wrapper failed (${backendResponse.status}): ${errorText}`);
                             }
                             result = await backendResponse.json(); // Result = { answer: "...", annotations: [...] }
                             console.log("File search wrapper result from backend:", result);
-                            // Update UI with the final result from the wrapper
-                            updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
+
+                            // ---- Store context IF it was a Socratic context fetch ----
+                            if (isSocraticContextFetch && useSocraticStore.getState().currentSocraticTopic === query) {
+                                const contextText = result?.answer || "Could not retrieve relevant context.";
+                                setRetrievedSocraticContext(contextText);
+                                console.log("Socratic context stored.");
+
+                                // Generate the specific prompt
+                                const topic = useSocraticStore.getState().currentSocraticTopic!;
+                                const fullSocraticPrompt = getSocraticPromptForTopic(topic, contextText);
+
+                                // Send the new prompt to the session
+                                sendEvent({
+                                    type: "session.update",
+                                    session: { instructions: fullSocraticPrompt }
+                                });
+                                console.log("Sent updated Socratic instructions to session.");
+
+                                // Set state to trigger the first question
+                                setSocraticDialogueState('ready_to_ask');
+                                sendEvent({ type: "response.create" });
+                                console.log("Requested initial Socratic question.");
+                            } else if (!isSocraticContextFetch) {
+                                // Update UI only for non-Socratic fetches
+                                updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
+                            }
+                            // ---------------------------------------------------------
+
                         } catch (fetchError) {
                             console.error("Error calling file_search_wrapper backend:", fetchError);
                             const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown backend fetch error";
                             result = { error: errorMsg };
-                            updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                            if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                            if (isSocraticContextFetch) setSocraticDialogueState('idle'); // Reset state on error
                         }
                     }
                 }
-                // Send the result (or error) from the wrapper back to the Realtime API
-                if (toolCall.call_id) {
+                // Send the result back ONLY for NON-SOCRATIC calls
+                if (toolCall.call_id && !isSocraticContextFetch) {
                     sendEvent({
                         type: "conversation.item.create",
                         item: {
                             type: "function_call_output",
                             call_id: toolCall.call_id,
-                            // Send the entire result object from the wrapper back
-                            output: JSON.stringify(result), 
+                            output: JSON.stringify(result),
                         },
                     });
-                    // Trigger the assistant to process the result
-                    sendEvent({ type: "response.create" }); 
-                } else {
-                    console.warn("No call_id for file_search_wrapper, cannot send result back.", toolCall);
-                    // UI already updated with failure status above
+                    sendEvent({ type: "response.create" });
+                } else if (!toolCall.call_id && !isSocraticContextFetch) {
+                    console.warn("No call_id for non-Socratic file_search_wrapper.", toolCall);
                 }
-                // End specific logic for file_search_wrapper
                 return; // Prevent subsequent generic result handling
 
             }
@@ -306,7 +347,29 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             // UI already updated with failure status in try/catch
         }
 
-    }, [sendEvent]);
+    }, [sendEvent, setRetrievedSocraticContext, setSocraticDialogueState]);
+
+    // --- Effect to Trigger Context Retrieval --- 
+    useEffect(() => {
+        if (isSocraticModeActive && currentSocraticTopic && !retrievedSocraticContext && socraticDialogueState === 'retrieving_context') {
+            console.log(`Socratic Mode: Retrieving context for topic "${currentSocraticTopic}"`);
+            // Trigger the file search wrapper internally
+            executeToolFunction({
+                type: "function_call", // Simulate an internal call
+                name: "file_search_wrapper",
+                arguments: { query: currentSocraticTopic },
+                // Use a specific prefix for the call_id to identify it internally
+                call_id: `socratic-ctx-${Date.now()}`,
+                item_id: `socratic-ctx-item-${Date.now()}` // Optional item ID
+            });
+        }
+    }, [
+        isSocraticModeActive,
+        currentSocraticTopic,
+        retrievedSocraticContext,
+        socraticDialogueState,
+        executeToolFunction // executeToolFunction is stable due to useCallback
+    ]);
 
     const handleServerEvent = useCallback((event: RealtimeEvent) => {
         // console.log("Handling Server Event:", event.type, event); // Verbose logging
@@ -333,15 +396,35 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
             case "conversation.item.created": {
                 const item = event.item;
-                // Only add if it's a message and doesn't exist yet
-                if (item.type === 'message' && item.role && item.id) {
-                    const text = item.content?.[0]?.text ?? (item.role === 'user' ? "[Transcribing...]" : "[Generating...]");
-                    addTranscriptItem({ // Use helper to avoid duplicates
-                        type: "message", role: item.role, id: item.id,
-                        content: [{ type: item.content?.[0]?.type === 'input_text' ? 'input_text' : 'output_text', text }]
+                if (item.type === 'message' && item.role === 'user' && item.id) {
+                    const text = item.content?.[0]?.text ?? "[Transcribing...]";
+                    addTranscriptItem({ 
+                        type: "message", role: "user", id: item.id, 
+                        content: [{ type: 'input_text', text }] 
                     } as MessageItem);
+
+                    // --- Socratic Topic Setting Logic --- 
+                    const socraticState = useSocraticStore.getState(); // Get current Socratic state
+                    if (socraticState.isSocraticModeActive && !socraticState.currentSocraticTopic && socraticState.socraticDialogueState === 'idle') {
+                         // Assumption: First user message after activating Socratic mode sets the topic
+                         // More robust: Could wait for transcription complete event or specific phrase?
+                        if (text !== "[Transcribing...]") { // Wait for some actual text
+                            console.log("Socratic Mode: Setting topic from first user message:", text);
+                             setCurrentSocraticTopic(text); // Use the user message as the topic
+                             setSocraticDialogueState('retrieving_context'); // Trigger context retrieval
+                        }
+                    }
+                    // -------------------------------------
                 }
-                 // Handle other item types like tool_call creation if needed, though often handled by response.done
+                // Handle assistant messages
+                else if (item.type === 'message' && item.role === 'assistant' && item.id) {
+                     const text = item.content?.[0]?.text ?? "[Generating...]";
+                     addTranscriptItem({ 
+                         type: "message", role: "assistant", id: item.id, 
+                         content: [{ type: 'output_text', text }] 
+                     } as MessageItem);
+                }
+                // Handle tool calls if needed (though often handled by response.done)
                 break;
             }
 
@@ -364,8 +447,15 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                 const finalTranscript = !event.transcript || event.transcript.trim() === "" ? "[inaudible]" : event.transcript;
                 if (itemId) {
                     updateTranscriptItem(itemId, finalTranscript, false); // Replace with final transcript
-                    // Optionally add to a separate conversation history for API calls if needed
-                    // useConversationStore.getState().addConversationItem({ role: 'user', content: finalTranscript });
+
+                    // --- Socratic Topic Setting Logic (Alternative: On Completion) --- 
+                    const socraticState = useSocraticStore.getState();
+                    if (socraticState.isSocraticModeActive && !socraticState.currentSocraticTopic && socraticState.socraticDialogueState === 'idle') {
+                         console.log("Socratic Mode: Setting topic from completed transcript:", finalTranscript);
+                         setCurrentSocraticTopic(finalTranscript);
+                         setSocraticDialogueState('retrieving_context');
+                    }
+                    // -------------------------------------------------------------
                 }
                 break;
             }
@@ -409,51 +499,24 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                 console.log("Full response done event received:", event.response);
                 if (event.response?.output) {
                     event.response.output.forEach((outputItem: any) => {
-                        // --- Handle Function Calls --- 
-                        if (outputItem.type === "function_call" && outputItem.name && outputItem.arguments) {
-                            try {
-                                const parsedArgs = JSON.parse(outputItem.arguments);
-                                // Construct ToolCall object for execution
-                                const toolCallData: ToolCall = {
-                                    type: "function_call",
-                                    name: outputItem.name,
-                                    arguments: parsedArgs, // Pass parsed arguments
-                                    call_id: outputItem.call_id, // Essential for sending result back
-                                    // Attempt to associate with a response item ID if available
-                                    item_id: outputItem.item_id || event.response?.id || `tool-${outputItem.call_id || Date.now()}`
-                                };
-                                executeToolFunction(toolCallData);
-                            } catch (parseError) {
-                                console.error("Failed to parse function call arguments:", parseError, outputItem.arguments);
-                                // TODO: Handle parse error - maybe send error result back to API?
-                                // Find a way to display this error in the UI
-                                addTranscriptItem({
-                                    type: "message", role: "system", id: `error-parse-${Date.now()}`,
-                                    content: [{ type: 'output_text', text: `Error parsing tool arguments for ${outputItem.name}` }]
-                                } as MessageItem);
-                            }
-                        }
-                        // --- Handle File Search Call Output ---
-                        else if (outputItem.type === "file_search_call") {
-                            console.log("File search call output received:", outputItem);
-                            // Add an item to the UI to indicate search completion/status
-                            addTranscriptItem({
-                                type: "tool_call",
-                                tool_type: "file_search_call", // Use the new specific type
-                                id: outputItem.id || `fsc-${Date.now()}`, // Use event ID or generate
-                                status: outputItem.status || "completed", // Use status from event
-                                queries: outputItem.queries, // Include queries if available
-                                search_results: outputItem.search_results, // Include results if available
-                                call_id: outputItem.id, // The ID of the file_search_call event
-                            } as FileSearchCallItem); // Cast to the specific UI item type
-                        }
-                        // --- Handle other output item types if necessary --- 
-                        // e.g., if the response includes final text alongside function calls
-                        else if (outputItem.type === "message" && outputItem.role === 'assistant') {
-                             // This might duplicate response.audio_transcript.done, handle carefully
-                             console.log("Assistant message in response.done output:", outputItem);
-                             // Ensure it's not already added/updated by transcript events
-                             // addTranscriptItem(...) or updateTranscriptItem(...) if needed
+                        if (outputItem.type === "function_call" /* && !outputItem.call_id?.startsWith('socratic-ctx-') */ ) {
+                            // Standard function call execution (already handled by logic above?)
+                            // Ensure executeToolFunction is called if not already
+                        } else if (outputItem.type === "file_search_call") {
+                            // This event signals the *API's* file search is done. 
+                            // We use file_search_wrapper, so this might not be directly relevant unless 
+                            // the API itself was instructed to do a file search directly.
+                            // Add UI update for API-driven file search if needed.
+                             console.log("API File search call output received in response.done:", outputItem);
+                             addTranscriptItem({ // Example UI update
+                                 type: "tool_call",
+                                 tool_type: "file_search_call", 
+                                 id: outputItem.id || `fsc-api-${Date.now()}`,
+                                 status: outputItem.status || "completed",
+                                 queries: outputItem.queries,
+                                 search_results: outputItem.search_results,
+                                 call_id: outputItem.id,
+                             } as FileSearchCallItem);
                         }
                     });
                 }
@@ -571,7 +634,7 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                  console.warn('Unhandled server event type:', unhandledEvent?.type, unhandledEvent);
                 break;
         }
-    }, [executeToolFunction]); // executeToolFunction is the main dependency
+    }, [executeToolFunction, sendEvent, setCurrentSocraticTopic, setSocraticDialogueState]); // Include Socratic setters
 
     // Use a ref to ensure the callback passed to the effect always has the latest scope
     const handleServerEventRef = useRef(handleServerEvent);

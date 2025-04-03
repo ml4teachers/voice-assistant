@@ -18,9 +18,11 @@ import { Item, MessageItem, FunctionCallItem, FileSearchCallItem } from '@/hooks
 import useToolsStore from '@/stores/useToolsStore';
 // import { ScrollArea } from "@/components/ui/scroll-area"; // Import ScrollArea - Temporarily commented out
 import { cn } from "@/lib/utils"; // Import cn utility
+import { MicIcon } from "lucide-react"; // Import MicIcon for permission button
 
 
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
+type PermissionStatus = "prompt" | "granted" | "denied";
 
 export default function RealtimeChat() {
     const { chatMessages, rawSet: rawSetConversation } = useConversationStore(); // Get messages and rawSet from Zustand
@@ -32,6 +34,10 @@ export default function RealtimeChat() {
     // State for speaking indicator, managed by the event hook potentially
     const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
     const chatContainerRef = useRef<HTMLDivElement>(null); // Ref for scrolling
+    const [micPermission, setMicPermission] = useState<PermissionStatus>("prompt");
+    const localStreamRef = useRef<MediaStream | null>(null); // Ref to store the stream
+    // Get Socratic Mode Status from the store directly in the component body
+    const isSocraticModeEnabled = useToolsStore((state) => state.isSocraticModeEnabled);
 
     // Function to send events *to* the DataChannel
     const sendEvent = useCallback((event: any) => {
@@ -71,7 +77,43 @@ export default function RealtimeChat() {
         }
     }, [chatMessages]);
 
-    // Cleanup function
+    // Check initial permission status on mount
+    useEffect(() => {
+        navigator.permissions.query({ name: 'microphone' as PermissionName }).then((permissionStatus) => {
+             setMicPermission(permissionStatus.state);
+             permissionStatus.onchange = () => {
+                 setMicPermission(permissionStatus.state);
+             };
+        }).catch(err => {
+             console.warn("Could not query microphone permission status:", err);
+             // Assume prompt if query fails
+             setMicPermission("prompt"); 
+        });
+    }, []);
+
+    // --- Function to request microphone permission --- 
+    const requestMicrophoneAccess = useCallback(async () => {
+         console.log("Requesting microphone access...");
+         try {
+            // Stop any existing tracks before requesting new stream
+            localStreamRef.current?.getTracks().forEach(track => track.stop());
+
+             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+             localStreamRef.current = stream; // Store the stream
+             setMicPermission("granted");
+             setLastError(null); // Clear potential previous denial error
+             console.log("Microphone access granted.");
+             return stream;
+         } catch (err) {
+             console.error("Error getting user media:", err);
+             setMicPermission("denied");
+             setLastError("Microphone access denied. Please grant permission in your browser settings.");
+             return null;
+         }
+     }, []);
+     // ---------------------------------------------------
+
+    // Cleanup function - also stop local tracks
     const cleanupConnection = useCallback((errorMsg: string | null = null) => {
         console.log("Cleaning up connection...", errorMsg ? `Reason: ${errorMsg}` : '');
         if (errorMsg) setLastError(errorMsg);
@@ -98,50 +140,65 @@ export default function RealtimeChat() {
              remoteAudioElement.current.pause(); // Explicitly pause
         }
 
+        // Stop local microphone tracks
+        localStreamRef.current?.getTracks().forEach(track => track.stop());
+        localStreamRef.current = null;
+        // Optionally reset permission state if needed, or keep it
+        // setMicPermission("prompt"); 
+
         setSessionStatus(errorMsg ? 'ERROR' : 'DISCONNECTED');
-        setIsAssistantSpeaking(false); // Reset speaking state
+        setIsAssistantSpeaking(false);
 
     }, []); // Dependencies: state setters if they cause issues, but likely fine
 
-    // Function to start the session
+    // Function to start the session - Modified to use dynamic prompt
     const startSession = useCallback(async () => {
+        // Ensure permission is granted before proceeding
+        if (micPermission !== "granted") {
+            console.warn("Microphone permission not granted. Cannot start session.");
+            // Optionally trigger the request here, or rely on the button
+             // requestMicrophoneAccess(); 
+             setLastError("Please grant microphone permission first.");
+            return;
+        }
+
+        // Ensure we have a valid stream (it should be in localStreamRef if permission is granted)
+        if (!localStreamRef.current) {
+             console.error("Permission granted, but media stream is missing. Attempting to re-acquire.");
+             // Try to re-acquire - this might happen if permission was granted before page load
+             const stream = await requestMicrophoneAccess(); 
+             if (!stream) { 
+                 cleanupConnection("Failed to acquire media stream after permission grant.");
+                 return; 
+             }
+             localStreamRef.current = stream;
+        }
+
         if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
             console.warn("Session already connecting or connected.");
             return;
         }
-        console.log("Attempting to start Realtime session...");
+        console.log("Attempting to start Realtime session (mic granted)...");
         setIsAssistantSpeaking(false);
-        setLastError(null);
+        setLastError(null); 
         setSessionStatus('CONNECTING');
-        // Clear previous chat history except initial message
-        // rawSetConversation({ chatMessages: [useConversationStore.getState().chatMessages[0]] }); // Keep only initial message
-        rawSetConversation({ chatMessages: [] }); // Start fresh
+        rawSetConversation({ chatMessages: [] });
 
-        // Ensure audio element exists (moved from original code)
         if (!remoteAudioElement.current) {
             console.log("Creating audio element for playback.");
             remoteAudioElement.current = new Audio();
-            remoteAudioElement.current.autoplay = true;
-            remoteAudioElement.current.muted = false;
-            // Use setAttribute for playsInline to avoid TypeScript error
+            remoteAudioElement.current.autoplay = true; 
+            remoteAudioElement.current.muted = false; 
             remoteAudioElement.current.setAttribute('playsinline', 'true');
         }
 
-        // Prepare tools list for backend session creation
-        const toolsForBackend = getTools(); // Get the defined tools (incl. file_search wrapper)
-        // Remove tool_resources preparation, no longer needed for backend call
-        /*
-        const { fileSearchEnabled, vectorStore } = useToolsStore.getState();
-        const toolResourcesForBackend = (fileSearchEnabled && vectorStore?.id) 
-            ? { file_search: { vector_store_ids: [vectorStore.id] } } 
-            : null;
-        */
-
-        // Pass ONLY tools list to createRealtimeConnection
+        const toolsForBackend = getTools();
+        
+        // Pass the acquired mediaStream to createRealtimeConnection
         const connection = await createRealtimeConnection(
-            remoteAudioElement, 
-            toolsForBackend
-            // toolResourcesForBackend // <-- REMOVED
+            remoteAudioElement,
+            toolsForBackend,
+            localStreamRef.current! // Assert non-null after checks
         );
 
         if (!connection) {
@@ -168,39 +225,38 @@ export default function RealtimeChat() {
         dcRef.current.onopen = () => {
             console.log("DataChannel opened, sending session.update");
             setSessionStatus('CONNECTED');
-            setLastError(null); // Clear any previous error on successful connect
+            setLastError(null);
 
-            // --- Send initial session configuration --- 
-            // Get current tool status and vector store from Zustand
-            const { fileSearchEnabled, vectorStore } = useToolsStore.getState();
-            const tools = getTools(); // Get the updated tool list
+            // --- Dynamically select the prompt ---
+            const tools = getTools();
+            // Initial prompt: Use DEVELOPER_PROMPT. Socratic prompt will be set via session.update later if mode is active.
+            const currentInstructions = DEVELOPER_PROMPT;
+
+            // console.log(`Using instructions: ${isSocraticModeEnabled ? 'SOCRATIC' : 'DEVELOPER'}`); // Log statement might be misleading initially
+            console.log(`Initial instructions: DEVELOPER`);
+            // ---------------------------------------
 
             const initialSessionUpdate = {
                 type: "session.update",
                 session: {
-                    // Modalities and formats
-                    modalities: ["audio", "text"], // Enable both audio and text interaction
-                    input_audio_format: "pcm16", // Common format, ensure mic provides this
-                    output_audio_format: "pcm16", // Format for audio synthesis output
-                    input_audio_transcription: { model: "whisper-1" }, // Transcription model
-                    // Instructions and voice
-                    instructions: DEVELOPER_PROMPT,
-                    voice: "sage", // Example voice, choose from available options
-                    // Turn detection settings (Crucial for voice conversations)
+                    modalities: ["audio", "text"],
+                    input_audio_format: "pcm16",
+                    output_audio_format: "pcm16",
+                    input_audio_transcription: { model: "whisper-1" },
+                    instructions: currentInstructions, // <-- Use the selected prompt
+                    voice: "shimmer", // Or another voice like "sage"
                     turn_detection: {
-                        type: "server_vad", // Use server-side Voice Activity Detection
-                        threshold: 0.5, // Adjust sensitivity as needed
-                        silence_duration_ms: 800, // Duration of silence to detect end of turn
-                        create_response: true, // Automatically trigger response after silence
+                        type: "server_vad",
+                        threshold: 0.5,
+                        silence_duration_ms: 800,
+                        create_response: true,
                     },
-                    tools: tools, // <-- This should be the ONLY tool configuration parameter
+                    tools: tools,
+                    // vector_store_ids are handled via wrapper now
                 },
             };
-            console.log("Sending final session.update payload (only using tools array):", JSON.stringify(initialSessionUpdate, null, 2)); // Finales Logging
+            console.log("Sending session.update with payload:", JSON.stringify(initialSessionUpdate, null, 2));
             sendEvent(initialSessionUpdate);
-
-            // Optional: Send an initial event to potentially greet the user
-            // sendEvent({ type: "response.create" }); // Let the assistant start
         };
 
         dcRef.current.onclose = () => {
@@ -242,7 +298,16 @@ export default function RealtimeChat() {
              }
          };
 
-    }, [sessionStatus, cleanupConnection, sendEvent, handleServerEventRef, rawSetConversation]);
+    }, [
+        sessionStatus,
+        micPermission,
+        cleanupConnection,
+        sendEvent,
+        handleServerEventRef,
+        rawSetConversation,
+        requestMicrophoneAccess,
+        isSocraticModeEnabled // <-- Add isSocraticModeEnabled to dependency array
+    ]);
 
     // Function to stop the session
     const stopSession = useCallback(() => {
@@ -287,34 +352,36 @@ export default function RealtimeChat() {
          // Main container: Use flex column, set height (e.g., full screen height minus header/padding if needed)
          // Using h-full assumes parent provides height context. Adjust if needed.
          <div className={cn("flex flex-col h-full p-4 gap-4 bg-background")}>
-            <h2 className="text-xl font-semibold text-center text-foreground flex-shrink-0">Realtime Voice Assistant</h2>
-            <ErrorDisplay lastError={lastError} />
+             {/* Limit max width and center content */}
+             <div className="max-w-4xl w-full mx-auto flex flex-col h-full gap-4">
+                <h2 className="text-xl font-semibold text-center text-foreground flex-shrink-0">Realtime Voice Assistant</h2>
+                <ErrorDisplay lastError={lastError} />
 
-            {/* Chat Controls - Pass clearConversation handler */}
-            <div className="flex-shrink-0">
-                <ChatControls
-                    isConnected={sessionStatus === 'CONNECTED'}
-                    isConnecting={sessionStatus === 'CONNECTING'}
-                    isSpeaking={isAssistantSpeaking}
-                    currentUtterance={""} 
-                    startSession={startSession}
-                    stopSession={stopSession}
-                    clearConversation={clearConversation} // Pass down the handler
-                />
-            </div>
+                {/* Chat Controls - Conditionally disable Start button, add Permission button */}
+                <div className="flex-shrink-0">
+                    <ChatControls
+                        isConnected={sessionStatus === 'CONNECTED'}
+                        isConnecting={sessionStatus === 'CONNECTING'}
+                        isSpeaking={isAssistantSpeaking}
+                        currentUtterance={""}
+                        startSession={startSession}
+                        stopSession={stopSession}
+                        clearConversation={clearConversation}
+                        // Pass permission status and request function
+                        micPermission={micPermission} 
+                        requestMicPermission={requestMicrophoneAccess}
+                    />
+                </div>
 
-            {/* Transcript Display Area - Make it grow */} 
-            {/* Replace ScrollArea with standard div + overflow-y-auto */}
-            <div 
-                ref={chatContainerRef} 
-                className={cn(
-                    "flex-grow rounded-md border bg-card shadow-inner", // Base styles
-                    "h-0 min-h-[200px]", // Height control for flex-grow
-                    "overflow-y-auto p-4 space-y-4" // Scrolling and internal padding/spacing
-                )}
-            >
-                {/* Inner div is no longer strictly necessary if padding/spacing is on the outer div */}
-                {/* <div className="p-4 space-y-4"> */} 
+                {/* Transcript Display Area */} 
+                <div 
+                    ref={chatContainerRef} 
+                    className={cn(
+                        "flex-grow rounded-md bg-card", 
+                        "h-0 min-h-[200px]", 
+                        "overflow-y-auto p-4 space-y-4" 
+                    )}
+                >
                     {chatMessages.map((item: Item) => (
                         <React.Fragment key={item.id}> 
                             {item.type === "message" && <Message message={item as MessageItem} />} 
@@ -326,11 +393,11 @@ export default function RealtimeChat() {
                              <div className="text-center text-muted-foreground italic">Connecting...</div>
                         </div>
                      }
-                {/* </div> */} 
-             </div>
+                </div>
 
-            {/* Audio Element for Playback (Keep it rendered but hidden) */} 
-             <audio ref={remoteAudioElement} hidden playsInline />
-        </div>
+                {/* Audio Element for Playback (Keep it rendered but hidden) */} 
+                 <audio ref={remoteAudioElement} hidden playsInline />
+             </div>
+         </div>
     );
 }
