@@ -30,7 +30,7 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         model: model,
-        input_audio_transcription: { model: 'gpt-4o-mini-transcribe' },
+        input_audio_transcription: { model: 'gpt-4o-mini-transcribe', language: 'de' },
         // Pass tools and tool_resources if they are provided and valid
         ...(tools && tools.length > 0 && { tools: tools }),
         ...(tool_resources && { tool_resources: tool_resources }),

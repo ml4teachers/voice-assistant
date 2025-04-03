@@ -16,6 +16,8 @@ import ToolCall from './tool-call'; // Assuming this component exists
 // Import all necessary specific item types
 import { Item, MessageItem, FunctionCallItem, FileSearchCallItem } from '@/hooks/useHandleRealtimeEvents'; // Adjust path if types moved
 import useToolsStore from '@/stores/useToolsStore';
+// import { ScrollArea } from "@/components/ui/scroll-area"; // Import ScrollArea - Temporarily commented out
+import { cn } from "@/lib/utils"; // Import cn utility
 
 
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
@@ -183,7 +185,7 @@ export default function RealtimeChat() {
                     input_audio_transcription: { model: "whisper-1" }, // Transcription model
                     // Instructions and voice
                     instructions: DEVELOPER_PROMPT,
-                    voice: "shimmer", // Example voice, choose from available options
+                    voice: "sage", // Example voice, choose from available options
                     // Turn detection settings (Crucial for voice conversations)
                     turn_detection: {
                         type: "server_vad", // Use server-side Voice Activity Detection
@@ -271,40 +273,61 @@ export default function RealtimeChat() {
         // We don't need sessionStatus here as the check relies on the refs.
     }, [cleanupConnection]);
 
+    // --- Add function to clear conversation ---
+    const clearConversation = useCallback(() => {
+        console.log("Clearing conversation history.");
+        // Reset chat messages, potentially keep initial system message if desired
+        // rawSetConversation({ chatMessages: [INITIAL_SYSTEM_MESSAGE] }); 
+        rawSetConversation({ chatMessages: [] }); // Clears completely
+    }, [rawSetConversation]);
+    // ------------------------------------------
+
     // --- Render UI --- 
     return (
-         <div className="flex flex-col h-[calc(100vh-4rem)] p-4 border rounded-lg shadow-md max-w-4xl mx-auto bg-gray-50">
-            <h2 className="text-xl font-semibold text-center mb-2">Realtime Voice Assistant</h2>
+         // Main container: Use flex column, set height (e.g., full screen height minus header/padding if needed)
+         // Using h-full assumes parent provides height context. Adjust if needed.
+         <div className={cn("flex flex-col h-full p-4 gap-4 bg-background")}>
+            <h2 className="text-xl font-semibold text-center text-foreground flex-shrink-0">Realtime Voice Assistant</h2>
             <ErrorDisplay lastError={lastError} />
 
-            {/* Chat Controls */}
-            <div className="my-4 flex-shrink-0">
+            {/* Chat Controls - Pass clearConversation handler */}
+            <div className="flex-shrink-0">
                 <ChatControls
                     isConnected={sessionStatus === 'CONNECTED'}
                     isConnecting={sessionStatus === 'CONNECTING'}
-                    isSpeaking={isAssistantSpeaking} // Pass speaking state derived from events/hook
-                    currentUtterance={""} // Placeholder, user utterance is handled internally now
+                    isSpeaking={isAssistantSpeaking}
+                    currentUtterance={""} 
                     startSession={startSession}
                     stopSession={stopSession}
+                    clearConversation={clearConversation} // Pass down the handler
                 />
             </div>
 
-            {/* Transcript Display Area */}
-            <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4 border rounded-md bg-white shadow-inner mb-4 min-h-[300px]">
-                <div className="space-y-4">
+            {/* Transcript Display Area - Make it grow */} 
+            {/* Replace ScrollArea with standard div + overflow-y-auto */}
+            <div 
+                ref={chatContainerRef} 
+                className={cn(
+                    "flex-grow rounded-md border bg-card shadow-inner", // Base styles
+                    "h-0 min-h-[200px]", // Height control for flex-grow
+                    "overflow-y-auto p-4 space-y-4" // Scrolling and internal padding/spacing
+                )}
+            >
+                {/* Inner div is no longer strictly necessary if padding/spacing is on the outer div */}
+                {/* <div className="p-4 space-y-4"> */} 
                     {chatMessages.map((item: Item) => (
                         <React.Fragment key={item.id}> 
-                            {/* Render Message component if item type is message */}
                             {item.type === "message" && <Message message={item as MessageItem} />} 
-                            {/* Render ToolCall component if item type is tool_call */}
                             {item.type === "tool_call" && <ToolCall toolCall={item} />} 
-                            {/* Cast inside ToolCall component handles FunctionCallItem/FileSearchCallItem */}
                         </React.Fragment>
                     ))}
-                    {/* Display a thinking indicator while connecting or waiting */} 
-                    {sessionStatus === 'CONNECTING' && <div className="text-center text-gray-500 italic">Connecting...</div>}
-                </div>
-            </div>
+                    {sessionStatus === 'CONNECTING' && 
+                        <div className="flex justify-center items-center p-4">
+                             <div className="text-center text-muted-foreground italic">Connecting...</div>
+                        </div>
+                     }
+                {/* </div> */} 
+             </div>
 
             {/* Audio Element for Playback (Keep it rendered but hidden) */} 
              <audio ref={remoteAudioElement} hidden playsInline />

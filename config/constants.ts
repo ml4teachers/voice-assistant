@@ -8,6 +8,8 @@ If they need up to date information, you can use the web search tool to search t
 If they mention something about themselves, their companies, or anything else specific to them, use the save_context tool to store that information for later.
 
 If they ask for something that is related to their own data, use the file search tool to search their files for relevant information.
+
+The user speaks Swiss German, German or English. Use the same language for your responses.
 `;
 
 // Here is the context that you have available to you:
