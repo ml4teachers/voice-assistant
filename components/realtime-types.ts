@@ -1,7 +1,10 @@
+import { WebSearchConfig } from "@/stores/useToolsStore";
+
 export interface EphemeralTokenResponse {
     client_secret: {
         value: string;
     };
+    id: string;
 }
 
 export interface RealtimeEventBase { type: string; event_id?: string; }
@@ -39,8 +42,32 @@ export interface ResponseOutputItemDoneEvent extends RealtimeEventBase { type: '
 export interface OutputAudioBufferStartedEvent extends RealtimeEventBase { type: 'output_audio_buffer.started'; response_id: string; }
 export interface OutputAudioBufferStoppedEvent extends RealtimeEventBase { type: 'output_audio_buffer.stopped'; response_id: string; }
 export interface ToolCallEvent extends RealtimeEventBase { type: 'tool_calls'; data: { tool_calls: any[] }; } 
-export interface ErrorEvent extends RealtimeEventBase { type: 'error'; data: { message: string; code?: number }; }
+export interface ErrorEvent extends RealtimeEventBase { 
+    type: 'error'; 
+    error?: { 
+        type?: string; 
+        code?: string | number; 
+        message: string; 
+        param?: string; 
+    }; 
+    data?: { message: string; code?: number }; 
+}
 
+export interface ResponseFunctionCallArgumentsDeltaEvent extends RealtimeEventBase {
+    type: 'response.function_call_arguments.delta';
+    response_id: string;
+    item_id: string;
+    output_index: number;
+    delta: string;
+}
+
+export interface ResponseFunctionCallArgumentsDoneEvent extends RealtimeEventBase {
+    type: 'response.function_call_arguments.done';
+    response_id: string;
+    item_id: string;
+    output_index: number;
+    arguments: string;
+}
 
 export type RealtimeEvent =
     | SessionCreatedEvent 
@@ -65,10 +92,46 @@ export type RealtimeEvent =
     | OutputAudioBufferStartedEvent
     | OutputAudioBufferStoppedEvent
     | ToolCallEvent 
-    | ErrorEvent;
+    | ErrorEvent
+    | ResponseFunctionCallArgumentsDeltaEvent
+    | ResponseFunctionCallArgumentsDoneEvent;
 
 export interface ConversationTurn {
     role: 'user' | 'assistant';
     text: string;
     id: string; 
 }
+
+// --- Tool Definition Types (New) ---
+export interface ToolParameterProperty {
+  type: string;
+  description?: string;
+  enum?: string[];
+  // Add other potential properties based on OpenAPI spec if needed
+}
+
+export interface ToolParameters {
+  type: "object";
+  properties: Record<string, ToolParameterProperty>;
+  required?: string[];
+  // additionalProperties?: boolean; // Check if supported/needed by Realtime API
+}
+
+export interface Tool {
+  type: "function"; // Assuming all tools are functions for now
+  name: string;
+  description: string;
+  parameters?: ToolParameters; // Optional for tools without params
+  // strict?: boolean; // Check if supported/needed
+}
+
+// --- Tool Call Type (New) ---
+// Represents a function call requested by the model via the DataChannel
+export interface ToolCall {
+    type: "function_call"; // Differentiates from other potential tool types
+    name: string;
+    arguments: any; // Parsed arguments object
+    call_id?: string; // ID provided by OpenAI to match result
+    item_id?: string; // ID of the conversation item associated with the call
+}
+// --- End New Types ---

@@ -1,65 +1,61 @@
-import { toolsList } from "../../config/tools-list";
+import { toolsList } from "@/config/tools-list";
 import useToolsStore from "@/stores/useToolsStore";
-import { WebSearchConfig } from "@/stores/useToolsStore";
+import { Tool, ToolParameterProperty } from "@/components/realtime-types";
 
-interface WebSearchTool extends WebSearchConfig {
-  type: "web_search";
-}
-export const getTools = () => {
+export const getTools = (): Tool[] => {
   const {
     webSearchEnabled,
     fileSearchEnabled,
     functionsEnabled,
-    vectorStore,
-    webSearchConfig,
   } = useToolsStore.getState();
 
-  const tools = [];
+  const tools: Tool[] = [];
 
   if (webSearchEnabled) {
-    const webSearchTool: WebSearchTool = {
-      type: "web_search",
-    };
-    if (
-      webSearchConfig.user_location &&
-      (webSearchConfig.user_location.country !== "" ||
-        webSearchConfig.user_location.region !== "" ||
-        webSearchConfig.user_location.city !== "")
-    ) {
-      webSearchTool.user_location = webSearchConfig.user_location;
-    }
-
-    tools.push(webSearchTool);
+    tools.push({
+      type: "function",
+      name: "web_search",
+      description: "Search the web for relevant information.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query" }
+        },
+        required: ["query"],
+      }
+    });
   }
 
   if (fileSearchEnabled) {
-    const fileSearchTool = {
-      type: "file_search",
-      vector_store_ids: [vectorStore?.id],
-    };
-    tools.push(fileSearchTool);
+    tools.push({
+      type: "function",
+      name: "file_search",
+      description: "Search the user's uploaded files.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "The search query for files" }
+        },
+        required: ["query"],
+      }
+    });
   }
 
   if (functionsEnabled) {
     tools.push(
-      ...toolsList.map((tool) => {
-        return {
-          type: "function",
-          name: tool.name,
-          description: tool.description,
-          parameters: {
-            type: "object",
-            properties: { ...tool.parameters },
-            required: Object.keys(tool.parameters),
-            additionalProperties: false,
-          },
-          strict: true,
-        };
-      })
+      ...toolsList.map((toolDef): Tool => ({
+        type: "function",
+        name: toolDef.name,
+        description: toolDef.description,
+        parameters: {
+          type: "object",
+          properties: toolDef.parameters as Record<string, ToolParameterProperty>,
+          required: Object.keys(toolDef.parameters),
+        },
+      }))
     );
   }
 
-  console.log("tools", tools);
-
+  console.log("Generated Realtime API Tools:", tools);
   return tools;
 };

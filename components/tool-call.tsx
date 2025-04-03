@@ -1,6 +1,6 @@
 import React from "react";
 
-import { ToolCallItem } from "@/lib/assistant";
+import { ToolCallItem } from "@/hooks/useHandleRealtimeEvents";
 import { BookOpenText, Clock, Globe, Zap } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
@@ -43,18 +43,45 @@ function ApiCallCell({ toolCall }: ToolCallProps) {
             </div>
             <div className="max-h-96 overflow-y-scroll mx-6 p-2 text-xs">
               {toolCall.output ? (
-                <SyntaxHighlighter
-                  customStyle={{
-                    backgroundColor: "#fafafa",
-                    padding: "8px",
-                    paddingLeft: "0px",
-                    marginTop: 0,
-                  }}
-                  language="json"
-                  style={coy}
-                >
-                  {JSON.stringify(JSON.parse(toolCall.output), null, 2)}
-                </SyntaxHighlighter>
+                (() => {
+                  try {
+                    const parsedOutput = JSON.parse(toolCall.output);
+
+                    // Specific handling for errors returned by tools
+                    if (parsedOutput?.error) {
+                        return (
+                            <div className="whitespace-pre-wrap p-2 text-red-600">
+                                Error: {parsedOutput.error}
+                            </div>
+                        );
+                    }
+
+                    // Fallback for other successful tool calls: Show formatted JSON
+                    return (
+                      <SyntaxHighlighter
+                        customStyle={{
+                          backgroundColor: "#fafafa",
+                          padding: "8px",
+                          paddingLeft: "0px",
+                          marginTop: 0,
+                        }}
+                        language="json"
+                        style={coy}
+                      >
+                        {JSON.stringify(parsedOutput, null, 2)}
+                      </SyntaxHighlighter>
+                    );
+                  } catch (e) {
+                    // Fallback if output is not valid JSON
+                    console.error("Failed to parse tool output:", e);
+                    return (
+                       <div className="whitespace-pre-wrap p-2 text-orange-600">
+                           Raw Output (JSON parse failed):
+                           {toolCall.output}
+                       </div>
+                    )
+                  }
+                })()
               ) : (
                 <div className="text-zinc-500 flex items-center gap-2 py-2">
                   <Clock size={16} /> Waiting for result...
@@ -97,18 +124,7 @@ function WebSearchCell({ toolCall }: ToolCallProps) {
 export default function ToolCall({ toolCall }: ToolCallProps) {
   return (
     <div className="flex justify-start pt-2">
-      {(() => {
-        switch (toolCall.tool_type) {
-          case "function_call":
-            return <ApiCallCell toolCall={toolCall} />;
-          case "file_search_call":
-            return <FileSearchCell toolCall={toolCall} />;
-          case "web_search_call":
-            return <WebSearchCell toolCall={toolCall} />;
-          default:
-            return null;
-        }
-      })()}
+      {toolCall.tool_type === "function_call" && <ApiCallCell toolCall={toolCall} />}
     </div>
   );
 }

@@ -1,392 +1,292 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { Mic, MicOff, AlertTriangle } from 'lucide-react';
-import {
-    RealtimeEvent,
-    ConversationTurn,
-    EphemeralTokenResponse // Assuming this type is also moved or defined elsewhere
-} from './realtime-types'; // Import the types from the new file
-import ErrorDisplay from './ErrorDisplay'; // Import the new component
-import ChatControls from './ChatControls'; // Import the new component
-import ConversationDisplay from './ConversationDisplay'; // Import the new component
+import useConversationStore from '@/stores/useConversationStore';
+import { createRealtimeConnection } from '@/lib/realtime/connection'; // Use the new connection logic
+import { useHandleRealtimeEvents } from '@/hooks/useHandleRealtimeEvents'; // Use the new event handler hook
+import { getTools } from '@/lib/tools/tools'; // Use the adapted tool getter
+import { DEVELOPER_PROMPT, MODEL } from '@/config/constants'; // Import MODEL as well
+import { RealtimeEvent } from './realtime-types';
+import ErrorDisplay from './ErrorDisplay';
+import ChatControls from './ChatControls';
+// Import Message and ToolCall components for rendering the transcript
+import Message from './message'; // Assuming this component exists
+import ToolCall from './tool-call'; // Assuming this component exists
+// Use the Item type defined/imported in the hook or centrally
+import { Item, MessageItem, ToolCallItem } from '@/hooks/useHandleRealtimeEvents'; // Adjust path if types moved
+
+
+type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
 
 export default function RealtimeChat() {
-    const [isConnecting, setIsConnecting] = useState(false);
-    const [isConnected, setIsConnected] = useState(false);
-    const [isSpeaking, setIsSpeaking] = useState(false); 
-    const [conversationHistory, setConversationHistory] = useState<ConversationTurn[]>([]); // Stores the full conversation history
-    const [currentUtterance, setCurrentUtterance] = useState<string>(''); // Stores the transcript of the *current* user speech
-    const [assistantResponse, setAssistantResponse] = useState<string>(''); // Stores the transcript of the *current* assistant speech
+    const { chatMessages, rawSet: rawSetConversation } = useConversationStore(); // Get messages and rawSet from Zustand
+    const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
+    const pcRef = useRef<RTCPeerConnection | null>(null);
+    const dcRef = useRef<RTCDataChannel | null>(null);
+    const remoteAudioElement = useRef<HTMLAudioElement | null>(null);
     const [lastError, setLastError] = useState<string | null>(null);
+    // State for speaking indicator, managed by the event hook potentially
+    const [isAssistantSpeaking, setIsAssistantSpeaking] = useState(false);
+    const chatContainerRef = useRef<HTMLDivElement>(null); // Ref for scrolling
 
-    // --- Use object buffer for accumulating user transcript deltas --- 
-    const peerConnection = useRef<RTCPeerConnection | null>(null);
-    const dataChannel = useRef<RTCDataChannel | null>(null);
-    const localStream = useRef<MediaStream | null>(null);
-    const remoteAudioElement = useRef<HTMLAudioElement | null>(null); 
+    // Function to send events *to* the DataChannel
+    const sendEvent = useCallback((event: any) => {
+        if (dcRef.current && dcRef.current.readyState === 'open') {
+            console.log(">>> Sending Client Event:", event.type, JSON.stringify(event));
+            dcRef.current.send(JSON.stringify(event));
+        } else {
+            console.error("Cannot send event, DataChannel not open.", event.type);
+        }
+    }, []);
 
+    // Hook to handle incoming server events
+    const handleServerEventRef = useHandleRealtimeEvents(sendEvent);
+
+    // Effect to update speaking state based on events (example)
+    useEffect(() => {
+        // Logic to derive isAssistantSpeaking from chatMessages or specific events
+        // This might need refinement based on how the hook updates the store
+        const lastMessage = chatMessages[chatMessages.length - 1];
+        // Example crude logic: assume speaking if last message is assistant and recent
+        // A better approach is to use output_audio_buffer.started/stopped events in the hook
+        // to update a dedicated state or a property on the MessageItem.
+        // setIsAssistantSpeaking(lastMessage?.role === 'assistant' && ...);
+
+        // Also listen for the specific events in the hook to set state:
+        // In useHandleRealtimeEvents:
+        // case 'output_audio_buffer.started': setIsAssistantSpeaking(true); break;
+        // case 'output_audio_buffer.stopped': setIsAssistantSpeaking(false); break;
+        // Need to pass setIsAssistantSpeaking to the hook or manage state differently.
+
+    }, [chatMessages]);
+
+    // Effect to scroll chat to bottom
+    useEffect(() => {
+        if (chatContainerRef.current) {
+            chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+        }
+    }, [chatMessages]);
+
+    // Cleanup function
     const cleanupConnection = useCallback((errorMsg: string | null = null) => {
         console.log("Cleaning up connection...", errorMsg ? `Reason: ${errorMsg}` : '');
-        setLastError(errorMsg); 
+        if (errorMsg) setLastError(errorMsg);
+        else setLastError(null); // Clear error if cleaning up normally
 
-        if (dataChannel.current) {
-            if (dataChannel.current.readyState === 'open') {
-                try { dataChannel.current.close(); } catch (e) { console.error("Error closing data channel:", e); }
+        if (dcRef.current) {
+            dcRef.current.onmessage = null; dcRef.current.onopen = null; dcRef.current.onclose = null; dcRef.current.onerror = null;
+            if (dcRef.current.readyState !== 'closed') {
+                try { dcRef.current.close(); } catch (e) { console.error("Error closing dc:", e); }
             }
-            dataChannel.current.onmessage = null;
-            dataChannel.current.onopen = null;
-            dataChannel.current.onclose = null;
-            dataChannel.current.onerror = null;
-            dataChannel.current = null;
+            dcRef.current = null;
         }
-
-        if (localStream.current) {
-            localStream.current.getTracks().forEach(track => track.stop());
-            localStream.current = null;
-        }
-
-        if (peerConnection.current) {
-            if (peerConnection.current.connectionState !== 'closed') {
-                try { peerConnection.current.close(); } catch (e) { console.error("Error closing peer connection:", e); }
+        if (pcRef.current) {
+            pcRef.current.onicecandidate = null; pcRef.current.onconnectionstatechange = null; pcRef.current.ontrack = null;
+            // Stop microphone tracks by stopping the sender's track
+            pcRef.current.getSenders().forEach(sender => sender.track?.stop());
+            if (pcRef.current.connectionState !== 'closed') {
+                try { pcRef.current.close(); } catch (e) { console.error("Error closing pc:", e); }
             }
-            peerConnection.current.onicecandidate = null;
-            peerConnection.current.onconnectionstatechange = null;
-            peerConnection.current.ontrack = null;
-            peerConnection.current = null;
+            pcRef.current = null;
         }
-
         if (remoteAudioElement.current) {
-            remoteAudioElement.current.srcObject = null;
-            remoteAudioElement.current.pause();
+             remoteAudioElement.current.srcObject = null;
+             remoteAudioElement.current.pause(); // Explicitly pause
         }
 
-        setIsConnected(false);
-        setIsConnecting(false);
-        setIsSpeaking(false); 
-        setCurrentUtterance(''); // Clear any in-progress utterance
-        setAssistantResponse(''); // Clear any in-progress response
-        // Keep conversation history upon cleanup
-    }, []);
+        setSessionStatus(errorMsg ? 'ERROR' : 'DISCONNECTED');
+        setIsAssistantSpeaking(false); // Reset speaking state
 
-    const handleDataChannelMessage = useCallback((event: MessageEvent) => {
-        try {
-            const message: RealtimeEvent = JSON.parse(event.data); 
-            // console.log('Data Channel Message Type:', message.type); // Log only type for less noise
-            setLastError(null); 
+    }, []); // Dependencies: state setters if they cause issues, but likely fine
 
-            switch (message.type) { 
-                case 'session.created': 
-                    console.log('Conversation session created:', message.session.session_id);
-                    setIsConnected(true);
-                    setIsConnecting(false);
-                    setConversationHistory([]);
-                    break;
-                case 'session.updated': 
-                    console.log('Session updated.'); // Simplified log
-                    break;
-                case 'input_audio_buffer.speech_started':
-                    console.log(`Speech started (item: ${message.item_id})`);
-                    setCurrentUtterance('...');
-                    break;
-                case 'input_audio_buffer.speech_stopped':
-                    console.log(`Speech stopped (item: ${message.item_id})`);
-                    break;
-                case 'input_audio_buffer.committed':
-                    console.log(`Audio buffer committed (item: ${message.item_id})`);
-                    break;
-                case 'conversation.item.created':
-                     // This often just signals the item exists, actual content comes later?
-                     console.log(`Conversation item created (type: ${message.item?.type}, role: ${message.item?.role}, id: ${message.item?.id})`);
-                     // Optionally clear previous assistant text here, 
-                     // although response.created might be better
-                     if (message.item?.role === 'assistant') {
-                         // We don't do anything with the assistant item creation itself yet
-                     }
-                    break;
-                // --- Re-added User Input Transcription Handling --- 
-                case 'conversation.item.input_audio_transcription.delta':
-                    // Append delta to the current utterance
-                    setCurrentUtterance(prev => (prev === '...' ? '' : prev) + message.delta);
-                    break;
-                case 'conversation.item.input_audio_transcription.completed':
-                    console.log(`User transcript completed (item: ${message.item_id}):`, message.transcript);
-                    // Finalize current utterance and append it to history
-                    setConversationHistory(prev => [...prev, { role: 'user', text: message.transcript, id: message.item_id }]);
-                    setCurrentUtterance(''); // Clear current utterance display
-                    break;
-                case 'response.created': 
-                    console.log(`Response created (id: ${message.response?.id})`); 
-                    break;
-                case 'response.done': 
-                    console.log(`Response done (id: ${message.response?.id}, status: ${message.response?.status})`); 
-                    if (message.response?.status === 'failed' || message.response?.status === 'cancelled') {
-                        console.error('--> Response failed or cancelled:', message.response.status_details);
-                        setLastError(`Response failed: ${message.response.status_details?.error?.message || message.response.status}`);
-                    } 
-                    break;
-                case 'rate_limits.updated':
-                    // console.log('Rate limits updated.'); // Likely not needed for UI
-                    break;
-                case 'response.output_item.added':
-                    // console.log('Response output item added.'); // Info only
-                    break;
-                case 'response.content_part.added':
-                    // console.log('Response content part added.'); // Info only
-                    break;
-                // --- Assistant Output Transcription --- 
-                case 'response.audio_transcript.delta':
-                    // console.log('Assistant transcript delta');
-                    setAssistantResponse(prev => prev + message.delta);
-                    break;
-                case 'response.audio.done':
-                    // console.log('Response audio part done.'); // Info only
-                    break;
-                case 'response.audio_transcript.done':
-                    console.log('Assistant transcript done:', message.transcript);
-                    // Add completed assistant response to history and clear current buffer
-                    setConversationHistory(prev => [...prev, { role: 'assistant', text: message.transcript, id: message.response_id }]);
-                    setAssistantResponse(''); // Clear current assistant response buffer
-                    break;
-                // -------------------------------------
-                case 'response.content_part.done':
-                    // console.log('Response content part done.'); // Info only
-                    break;
-                case 'response.output_item.done':
-                    // console.log('Response output item done.'); // Info only
-                    break;
-                // --- Assistant Audio Buffer Handling --- 
-                case 'output_audio_buffer.started': 
-                    console.log('Output audio buffer started.'); 
-                    setIsSpeaking(true);
-                    break;
-                 case 'output_audio_buffer.stopped': 
-                    console.log('Output audio buffer stopped.'); 
-                    setIsSpeaking(false);
-                    break;
-                // ---------------------------------------
-                // --- Remove redundant/fallback handlers? --- 
-                // case 'output_text.delta': ...
-                // case 'output_text.done': ...
-                // case 'output_audio.started': ... 
-                // case 'output_audio.ended': ... 
-                // -----------------------------------------
-                case 'tool_calls':
-                     console.log('Tool calls requested:', message.data.tool_calls);
-                     // TODO: Implement actual tool call handling
-                    break;
-                case 'session.ended':
-                    console.log('Conversation session ended by server.', message.data?.reason);
-                    cleanupConnection(`Session ended: ${message.data?.reason || 'Server closed connection'}`);
-                    break;
-                case 'error':
-                    console.error('Realtime API Error:', message.data);
-                    cleanupConnection(`API Error: ${message.data.message}`);
-                    break;
-                default:
-                    // Now we should have cases for most things, log the object if still unknown
-                    const unknownMessage = message as any; // Explicit cast to handle 'never' type
-                    console.warn('Received unknown event type:', unknownMessage?.type, unknownMessage);
-            }
-
-        } catch (error) {
-            console.error('Error parsing data channel message:', error, event.data);
-        }
-    }, [cleanupConnection]);
-
-    const handleIceCandidate = useCallback((event: RTCPeerConnectionIceEvent) => {
-        if (event.candidate) {
-            console.log('ICE Candidate:', event.candidate.sdpMid, event.candidate.sdpMLineIndex);
-        } else {
-            console.log('End of ICE candidates.');
-        }
-    }, []);
-
-    const handleConnectionStateChange = useCallback(() => {
-        if (peerConnection.current) {
-            const state = peerConnection.current.connectionState;
-            console.log('Peer Connection State:', state);
-            switch (state) {
-                case 'connected':
-                    setLastError(null);
-                    break;
-                case 'disconnected':
-                    console.warn('Peer connection disconnected.');
-                    break;
-                case 'failed':
-                    console.error('Peer connection failed.');
-                    cleanupConnection('Connection failed');
-                    break;
-                case 'closed':
-                    console.log('Peer connection closed.');
-                    if(isConnected || isConnecting) {
-                        cleanupConnection('Connection closed');
-                    }
-                    break;
-            }
-        }
-    }, [cleanupConnection, isConnected, isConnecting]);
-
-    const handleTrack = useCallback((event: RTCTrackEvent) => {
-        console.log('Remote track received (Conversation Mode):', event.track, event.streams);
-        console.log(`Incoming track muted state: ${event.track.muted}`);
-        event.track.enabled = true; 
-        if (remoteAudioElement.current) {
-            remoteAudioElement.current.srcObject = event.streams && event.streams.length > 0 ? event.streams[0] : null;
-            remoteAudioElement.current.muted = false; // Ensure NOT muted
-            console.log(`Audio element muted state set to: ${remoteAudioElement.current.muted}`);
-            remoteAudioElement.current.play().catch(e => {
-                 console.error("Error playing remote audio:", e);
-                 setLastError(`Error playing audio: ${e.message}. Please check browser permissions/settings.`);
-            });
-        } else {
-            console.warn('Could not attach remote stream - No audio element reference.');
-        }
-    }, [setLastError]);
-
+    // Function to start the session
     const startSession = useCallback(async () => {
-        if (isConnecting || isConnected) return;
-        console.log("Attempting to start CONVERSATION session..."); 
-        setIsConnecting(true);
-        setLastError(null); 
-        setConversationHistory([]);
+        if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
+            console.warn("Session already connecting or connected.");
+            return;
+        }
+        console.log("Attempting to start Realtime session...");
+        setIsAssistantSpeaking(false);
+        setLastError(null);
+        setSessionStatus('CONNECTING');
+        // Clear previous chat history except initial message
+        // rawSetConversation({ chatMessages: [useConversationStore.getState().chatMessages[0]] }); // Keep only initial message
+        rawSetConversation({ chatMessages: [] }); // Start fresh
 
+        // Ensure audio element exists (moved from original code)
         if (!remoteAudioElement.current) {
             console.log("Creating audio element for playback.");
             remoteAudioElement.current = new Audio();
-            remoteAudioElement.current.autoplay = true; 
-            remoteAudioElement.current.muted = false; 
+            remoteAudioElement.current.autoplay = true;
+            remoteAudioElement.current.muted = false;
+            // Use setAttribute for playsInline to avoid TypeScript error
+            remoteAudioElement.current.setAttribute('playsinline', 'true');
         }
 
-        try {
-             console.log('Fetching ephemeral token...');
-            const tokenResponse = await fetch('/api/realtime-session', { 
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }, // Ensure header is set
-                body: JSON.stringify({}) // Body can be empty if defaults are ok, or specify model if needed
-            }); 
-            if (!tokenResponse.ok) {
-                 let errorMsg = `Token fetch failed: ${tokenResponse.status}`;
-                try {
-                    const errorData = await tokenResponse.json();
-                    errorMsg += ` - ${errorData.error || JSON.stringify(errorData)}`;
-                } catch { }
-                throw new Error(errorMsg);
-            }
-            const tokenData: EphemeralTokenResponse = await tokenResponse.json();
-            const ephemeralKey = tokenData.client_secret.value;
-            console.log('Ephemeral token received.');
+        const connection = await createRealtimeConnection(remoteAudioElement); // Pass audio element ref
 
-            console.log('Creating PeerConnection...');
-            peerConnection.current = new RTCPeerConnection();
-            peerConnection.current.onicecandidate = handleIceCandidate;
-            peerConnection.current.onconnectionstatechange = handleConnectionStateChange;
-            peerConnection.current.ontrack = handleTrack;
+        if (!connection) {
+            cleanupConnection("Failed to create WebRTC connection");
+            return;
+        }
 
-             console.log('Creating Data Channel...');
-             dataChannel.current = peerConnection.current.createDataChannel('oai-events', { ordered: true });
-             dataChannel.current.onmessage = handleDataChannelMessage;
-             dataChannel.current.onopen = () => console.log('Data channel opened');
-             dataChannel.current.onclose = () => {
-                 console.log('Data channel closed');
-                 if (peerConnection.current?.connectionState === 'connected') {
-                     cleanupConnection('Data channel closed unexpectedly');
-                 }
-             };
-             dataChannel.current.onerror = (err) => {
-                 console.error('Data channel error:', err);
-                 cleanupConnection('Data channel error');
-             };
+        pcRef.current = connection.pc;
+        dcRef.current = connection.dc;
 
-            console.log('Requesting microphone access...');
+        // --- Setup event listeners for the connection --- 
+        dcRef.current.onmessage = (event: MessageEvent) => {
             try {
-                localStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-            } catch (err) {
-                 console.error("Error getting user media:", err);
-                throw new Error("Microphone access denied or not available.");
+                const serverEvent = JSON.parse(event.data) as RealtimeEvent;
+                // Pass event to the handler hook
+                handleServerEventRef.current(serverEvent);
+            } catch (e) {
+                 console.error("Failed to parse server event:", e, event.data);
+                 // Maybe display a generic parse error in UI?
+                 setLastError("Error processing message from server.");
             }
-            localStream.current.getTracks().forEach(track => {
-                 if (peerConnection.current) {
-                    peerConnection.current.addTrack(track, localStream.current!);
-                    console.log('Local audio track added.');
-                }
-            });
+        };
 
-             console.log('Creating SDP offer...');
-            const offer = await peerConnection.current.createOffer();
-            await peerConnection.current.setLocalDescription(offer);
-            console.log('SDP offer created and set as local description.');
+        dcRef.current.onopen = () => {
+            console.log("DataChannel opened, sending session.update");
+            setSessionStatus('CONNECTED');
+            setLastError(null); // Clear any previous error on successful connect
 
-            const model = 'gpt-4o-mini-realtime-preview'; 
-            const apiUrl = `https://api.openai.com/v1/realtime?model=${model}`;
-            console.log(`Sending offer to ${apiUrl}...`);
-
-             const sdpResponse = await fetch(apiUrl, {
-                method: 'POST',
-                body: offer.sdp,
-                headers: {
-                    'Authorization': `Bearer ${ephemeralKey}`,
-                    'Content-Type': 'application/sdp'
+            // --- Send initial session configuration --- 
+            const tools = getTools();
+            const initialSessionUpdate = {
+                type: "session.update",
+                session: {
+                    // Modalities and formats
+                    modalities: ["audio", "text"], // Enable both audio and text interaction
+                    input_audio_format: "pcm16", // Common format, ensure mic provides this
+                    output_audio_format: "pcm16", // Format for audio synthesis output
+                    input_audio_transcription: { model: "whisper-1" }, // Transcription model
+                    // Instructions and voice
+                    instructions: DEVELOPER_PROMPT,
+                    voice: "shimmer", // Example voice, choose from available options
+                    // Turn detection settings (Crucial for voice conversations)
+                    turn_detection: {
+                        type: "server_vad", // Use server-side Voice Activity Detection
+                        threshold: 0.5, // Adjust sensitivity as needed
+                        silence_duration_ms: 800, // Duration of silence to detect end of turn
+                        create_response: true, // Automatically trigger response after silence
+                    },
+                    // Tools configuration
+                    tools: tools, // Send the generated tool list
+                    // Optionally add vector store IDs if file search requires it here
+                    // vector_store_ids: fileSearchEnabled ? [vectorStore?.id].filter(Boolean) : undefined,
                 },
-            });
-
-            if (!sdpResponse.ok) {
-                 const errorText = await sdpResponse.text();
-                throw new Error(`Failed to get SDP answer: ${sdpResponse.status} - ${errorText}`);
-            }
-
-            const answerSdp = await sdpResponse.text();
-            console.log('SDP answer received.');
-            const answer = {
-                 type: 'answer' as const,
-                sdp: answerSdp,
             };
-            if (peerConnection.current.signalingState !== 'have-local-offer') {
-                 console.warn(`Unexpected signaling state (${peerConnection.current.signalingState}) before setting remote description. Proceeding anyway.`);
-            }
-            await peerConnection.current.setRemoteDescription(answer);
-            console.log('Remote description set. WebRTC connection negotiation complete.');
+            sendEvent(initialSessionUpdate);
 
-        } catch (error) {
-             console.error('Error starting Conversation session:', error); 
-            const errorMsg = error instanceof Error ? error.message : "Unknown error during startup";
-            cleanupConnection(errorMsg); 
-        }
+            // Optional: Send an initial event to potentially greet the user
+            // sendEvent({ type: "response.create" }); // Let the assistant start
+        };
 
-    }, [isConnected, isConnecting, cleanupConnection, handleDataChannelMessage, handleIceCandidate, handleConnectionStateChange, handleTrack]);
+        dcRef.current.onclose = () => {
+             console.log("DataChannel closed.");
+             // Only cleanup if the session wasn't intentionally stopped or already in error state
+             if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
+                 cleanupConnection('Data channel closed unexpectedly');
+             }
+         };
 
+        dcRef.current.onerror = (event) => {
+             // The event object for onerror is RTCErrorEvent, which might have more details
+             const errorEvent = event as RTCErrorEvent;
+             console.error("DataChannel error:", errorEvent?.error || event);
+             cleanupConnection(`Data channel error: ${errorEvent?.error?.message || 'Unknown DC error'}`);
+         };
+
+        pcRef.current.onconnectionstatechange = () => {
+            const state = pcRef.current?.connectionState;
+            console.log("PeerConnection state changed:", state);
+             if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+                 // Avoid redundant cleanups if already handled by dc.onclose or stopSession
+                 if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
+                    cleanupConnection(`Connection transitioned to ${state}`);
+                }
+             }
+             // Handle 'connected' state if needed (e.g., clear specific errors)
+             if (state === 'connected') {
+                 setLastError(null); // Clear errors when fully connected
+             }
+         };
+
+         // Handle ICE candidates (optional but good practice for debugging)
+         pcRef.current.onicecandidate = (event: RTCPeerConnectionIceEvent) => {
+             if (event.candidate) {
+                 // console.log('Local ICE Candidate:', event.candidate.sdpMid, event.candidate.sdpMLineIndex);
+             } else {
+                 // console.log('End of ICE candidates.');
+             }
+         };
+
+    }, [sessionStatus, cleanupConnection, sendEvent, handleServerEventRef, rawSetConversation]);
+
+    // Function to stop the session
     const stopSession = useCallback(() => {
         console.log("Stopping session manually...");
-        cleanupConnection(); // Call cleanup without an error message
-    }, [cleanupConnection]);
+        if (dcRef.current && dcRef.current.readyState === 'open') {
+            sendEvent({ type: "session.end" }); // Gracefully end session on server first
+        }
+        // Cleanup immediately regardless of whether session.end was sent
+        cleanupConnection();
+    }, [cleanupConnection, sendEvent]);
 
+    // Cleanup on component unmount
     useEffect(() => {
+        // Store refs in variables to use in the cleanup function's closure
+        const pc = pcRef.current;
+        const dc = dcRef.current;
         return () => {
-            console.log("RealtimeChat component unmounting. Cleaning up...");
-            cleanupConnection("Component unmounted");
+            console.log("RealtimeChat component unmounting. Cleaning up refs:", { pcExists: !!pc, dcExists: !!dc });
+            // Only run full cleanup if connection refs were actually set during the component's lifecycle.
+            // This prevents premature cleanup during React Strict Mode's mount-unmount-mount cycle.
+            if (pc || dc) {
+                cleanupConnection("Component unmounted");
+            } else {
+                console.log("Skipping cleanup on unmount as connection refs were null.");
+            }
         };
+        // Dependency array: cleanupConnection itself depends on state setters, but the function identity is stable due to useCallback.
+        // We don't need sessionStatus here as the check relies on the refs.
     }, [cleanupConnection]);
 
+    // --- Render UI --- 
     return (
-        <div className="p-4 border rounded-lg shadow-md space-y-4 max-w-2xl mx-auto">
-            <h2 className="text-xl font-semibold text-center mb-4">Realtime Conversation</h2> 
+         <div className="flex flex-col h-[calc(100vh-4rem)] p-4 border rounded-lg shadow-md max-w-4xl mx-auto bg-gray-50">
+            <h2 className="text-xl font-semibold text-center mb-2">Realtime Voice Assistant</h2>
+            <ErrorDisplay lastError={lastError} />
 
-            <ErrorDisplay lastError={lastError} /> 
+            {/* Chat Controls */}
+            <div className="my-4 flex-shrink-0">
+                <ChatControls
+                    isConnected={sessionStatus === 'CONNECTED'}
+                    isConnecting={sessionStatus === 'CONNECTING'}
+                    isSpeaking={isAssistantSpeaking} // Pass speaking state derived from events/hook
+                    currentUtterance={""} // Placeholder, user utterance is handled internally now
+                    startSession={startSession}
+                    stopSession={stopSession}
+                />
+            </div>
 
-            <ChatControls 
-                isConnected={isConnected}
-                isConnecting={isConnecting}
-                isSpeaking={isSpeaking}
-                currentUtterance={currentUtterance}
-                startSession={startSession}
-                stopSession={stopSession}
-            />
+            {/* Transcript Display Area */}
+            <div ref={chatContainerRef} className="flex-grow overflow-y-auto p-4 border rounded-md bg-white shadow-inner mb-4 min-h-[300px]">
+                <div className="space-y-4">
+                    {chatMessages.map((item: Item) => (
+                        <React.Fragment key={item.id}> 
+                            {item.type === "message" && <Message message={item as MessageItem} />} 
+                            {item.type === "tool_call" && <ToolCall toolCall={item as ToolCallItem} />} 
+                        </React.Fragment>
+                    ))}
+                    {/* Display a thinking indicator while connecting or waiting */} 
+                    {sessionStatus === 'CONNECTING' && <div className="text-center text-gray-500 italic">Connecting...</div>}
+                </div>
+            </div>
 
-            <ConversationDisplay 
-                conversationHistory={conversationHistory}
-                currentUtterance={currentUtterance}
-                assistantResponse={assistantResponse}
-            />
+            {/* Audio Element for Playback (Keep it rendered but hidden) */} 
+             <audio ref={remoteAudioElement} hidden playsInline />
         </div>
     );
 }

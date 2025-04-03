@@ -1,5 +1,4 @@
 "use client";
-import Assistant from "@/components/assistant";
 import ToolsPanel from "@/components/tools-panel";
 import { Menu, X } from "lucide-react";
 import { useState } from "react";
@@ -11,7 +10,6 @@ export default function Main() {
   return (
     <div className="flex justify-center h-screen">
       <div className="w-full md:w-[70%]">
-        {/* <Assistant /> */}
         <RealtimeChat />
       </div>
       <div className=" hidden md:block w-[30%]">

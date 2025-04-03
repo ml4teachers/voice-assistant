@@ -1,39 +1,33 @@
 import { create } from "zustand";
-import { Item } from "@/lib/assistant";
-import { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { Item, MessageItem, ToolCallItem } from "@/hooks/useHandleRealtimeEvents";
 import { INITIAL_MESSAGE } from "@/config/constants";
 
 interface ConversationState {
-  // Items displayed in the chat
   chatMessages: Item[];
-  // Items sent to the Responses API
-  conversationItems: any[];
-
   setChatMessages: (items: Item[]) => void;
-  setConversationItems: (messages: any[]) => void;
   addChatMessage: (item: Item) => void;
-  addConversationItem: (message: ChatCompletionMessageParam) => void;
-  rawSet: (state: any) => void;
+  rawSet: (state: Partial<ConversationState>) => void;
 }
 
-const useConversationStore = create<ConversationState>((set) => ({
+const useConversationStore = create<ConversationState>((set, get) => ({
   chatMessages: [
     {
-      type: "message",
-      role: "assistant",
+      type: "message", role: "assistant", id: 'initial-msg-0',
       content: [{ type: "output_text", text: INITIAL_MESSAGE }],
-    },
+    } as MessageItem,
   ],
-  conversationItems: [],
+
   setChatMessages: (items) => set({ chatMessages: items }),
-  setConversationItems: (messages) => set({ conversationItems: messages }),
+
   addChatMessage: (item) =>
-    set((state) => ({ chatMessages: [...state.chatMessages, item] })),
-  addConversationItem: (message) =>
-    set((state) => ({
-      conversationItems: [...state.conversationItems, message],
-    })),
-  rawSet: set,
+    set((state) => {
+        if (item.id && state.chatMessages.some(msg => msg.id === item.id)) {
+            return state;
+        }
+        return { chatMessages: [...state.chatMessages, item] };
+    }),
+
+  rawSet: (newState) => set(newState),
 }));
 
 export default useConversationStore;
