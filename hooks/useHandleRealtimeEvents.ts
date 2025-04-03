@@ -1,6 +1,10 @@
 import { useRef, useCallback, useEffect } from "react";
 import { RealtimeEvent, ToolCall } from "@/components/realtime-types";
 import useConversationStore from "@/stores/useConversationStore";
+// Temporarily import Annotation type, assuming it exists in annotations.tsx
+// If not, define a placeholder type here.
+import { Annotation } from "@/components/annotations";
+import useToolsStore from "@/stores/useToolsStore";
 
 // --- Temporary Type Definitions (replace imports from @/lib/assistant) ---
 // Define placeholder types here. Refine or move to a central types file later.
@@ -9,15 +13,22 @@ interface BaseItem {
     type: string;
 }
 
+// Add annotations to ContentItem
+export interface ContentItem {
+    type: "input_text" | "output_text"; // Add other content types if needed
+    text?: string;
+    annotations?: Annotation[]; // Make annotations optional
+}
+
 export interface MessageItem extends BaseItem {
     type: "message";
     role: "user" | "assistant" | "system";
-    content: Array<{ type: string; text?: string }>;
+    content: ContentItem[]; // Use updated ContentItem
 }
 
-export interface ToolCallItem extends BaseItem {
+export interface FunctionCallItem extends BaseItem {
     type: "tool_call";
-    tool_type: "function_call"; // Or other tool types if applicable
+    tool_type: "function_call";
     name: string;
     arguments: string; // JSON stringified arguments
     parsedArguments?: any; // The parsed arguments object
@@ -26,7 +37,17 @@ export interface ToolCallItem extends BaseItem {
     call_id?: string; // OpenAI call ID
 }
 
-export type Item = MessageItem | ToolCallItem;
+export interface FileSearchCallItem extends BaseItem {
+    type: "tool_call";
+    tool_type: "file_search_call"; // Specific type for UI differentiation
+    status: "in_progress" | "completed" | "failed"; // Status from the event
+    queries?: string[]; // Optional query details from event
+    search_results?: any; // Optional results if requested/provided
+    call_id?: string; // ID of the file_search_call event itself
+    // Note: No traditional 'output' field like function calls
+}
+
+export type Item = MessageItem | FunctionCallItem | FileSearchCallItem;
 // --- End Temporary Type Definitions ---
 
 // --- Helper Functions to interact with Zustand store --- 
@@ -69,12 +90,12 @@ const updateTranscriptItem = (itemId: string, newText: string, append: boolean) 
 /**
  * Updates specific properties of a tool call item.
  */
-const updateToolCallItem = (itemId: string, updates: Partial<ToolCallItem>) => {
+const updateToolCallItem = (itemId: string, updates: Partial<FunctionCallItem>) => {
     useConversationStore.setState((state) => ({
         chatMessages: state.chatMessages.map(item => {
             if (item.id === itemId && item.type === 'tool_call') {
                 // Merge existing item with updates
-                return { ...item, ...updates } as ToolCallItem;
+                return { ...item, ...updates } as FunctionCallItem;
             }
             return item;
         })
@@ -86,90 +107,206 @@ const updateToolCallItem = (itemId: string, updates: Partial<ToolCallItem>) => {
 export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
     const executeToolFunction = useCallback(async (toolCall: ToolCall) => {
-        // Ensure item_id exists for UI updates, generate one if needed based on call_id
         const toolCallUiId = toolCall.item_id || `tool-${toolCall.call_id || Date.now()}`;
         console.log(`Executing tool: ${toolCall.name}`, toolCall.arguments);
 
-        // Add initial tool call item to UI
+        // Add initial tool call item to UI (as FunctionCallItem initially)
         addTranscriptItem({
             type: "tool_call",
             id: toolCallUiId,
-            tool_type: "function_call",
+            tool_type: "function_call", // Keep this for initial display consistency?
             status: "in_progress",
             name: toolCall.name,
-            arguments: JSON.stringify(toolCall.arguments), // Store original args string if needed
-            parsedArguments: toolCall.arguments, // Store parsed args
+            arguments: JSON.stringify(toolCall.arguments),
+            parsedArguments: toolCall.arguments,
             call_id: toolCall.call_id,
-            // output: undefined, // Initially no output
-        } as ToolCallItem);
+        } as FunctionCallItem);
 
         let result: any;
         try {
-            const params = toolCall.arguments; // Arguments should already be parsed object from handleServerEvent
-            let response: Response | null = null; // Initialize response as null
+            const params = toolCall.arguments;
+            let response: Response | null = null;
 
-            // --- Route to appropriate API endpoint based on tool name --- 
             if (toolCall.name === 'get_weather') {
                 const query = new URLSearchParams(params as any).toString();
                 response = await fetch(`/api/functions/get_weather?${query}`);
             } else if (toolCall.name === 'get_joke') {
                 response = await fetch(`/api/functions/get_joke`);
-            } else if (toolCall.name === 'file_search') {
-                console.warn("File search function execution - using placeholder result.");
-                // TODO: Implement actual API call to a backend endpoint for file search
-                // Example: 
-                // const query = new URLSearchParams({ query: params.query }).toString();
-                // response = await fetch(`/api/functions/file_search?${query}`); 
-                result = { info: `File search for '${params?.query}' would be performed here.`, files_found: [] }; // Placeholder
-            } else if (toolCall.name === 'web_search') {
+            }
+            // --- Handle File Search Wrapper Call --- 
+            else if (toolCall.name === 'file_search_wrapper') {
+                console.log("File search wrapper function called:", toolCall.arguments);
+                const query = toolCall.arguments?.query;
+
+                if (!query) {
+                    result = { error: "Missing query for file search wrapper" };
+                    console.error(result.error);
+                    updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                } else {
+                    // Update UI Status (still uses FunctionCallItem for display)
+                    updateToolCallItem(toolCallUiId, {
+                        status: "in_progress",
+                        parsedArguments: toolCall.arguments,
+                        output: JSON.stringify({ status: "calling backend wrapper...", query: query })
+                    });
+
+                    // Get Vector Store ID from Zustand
+                    const currentVectorStoreId = useToolsStore.getState().vectorStore?.id;
+                    if (!currentVectorStoreId) {
+                        result = { error: "No vector store configured in client state" };
+                        console.error(result.error);
+                        updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                    } else {
+                        // Call the backend wrapper route
+                        try {
+                            const apiUrl = `/api/functions/file_search_wrapper?query=${encodeURIComponent(query)}&vectorStoreId=${encodeURIComponent(currentVectorStoreId)}`;
+                            const backendResponse = await fetch(apiUrl);
+                            if (!backendResponse.ok) {
+                                const errorText = await backendResponse.text().catch(() => 'Failed to read error text from backend wrapper');
+                                throw new Error(`Backend wrapper failed (${backendResponse.status}): ${errorText}`);
+                            }
+                            result = await backendResponse.json(); // Result = { answer: "...", annotations: [...] }
+                            console.log("File search wrapper result from backend:", result);
+                            // Update UI with the final result from the wrapper
+                            updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
+                        } catch (fetchError) {
+                            console.error("Error calling file_search_wrapper backend:", fetchError);
+                            const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown backend fetch error";
+                            result = { error: errorMsg };
+                            updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                        }
+                    }
+                }
+                // Send the result (or error) from the wrapper back to the Realtime API
+                if (toolCall.call_id) {
+                    sendEvent({
+                        type: "conversation.item.create",
+                        item: {
+                            type: "function_call_output",
+                            call_id: toolCall.call_id,
+                            // Send the entire result object from the wrapper back
+                            output: JSON.stringify(result), 
+                        },
+                    });
+                    // Trigger the assistant to process the result
+                    sendEvent({ type: "response.create" }); 
+                } else {
+                    console.warn("No call_id for file_search_wrapper, cannot send result back.", toolCall);
+                    // UI already updated with failure status above
+                }
+                // End specific logic for file_search_wrapper
+                return; // Prevent subsequent generic result handling
+
+            }
+            // --- Handle Web Search Wrapper Call --- 
+            else if (toolCall.name === 'web_search_wrapper') {
+                console.log("Web search wrapper function called:", toolCall.arguments);
+                const query = toolCall.arguments?.query;
+                // const location = toolCall.arguments?.location; // Optional location param
+
+                if (!query) {
+                    result = { error: "Missing query for web search wrapper" };
+                    console.error(result.error);
+                    updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                } else {
+                    updateToolCallItem(toolCallUiId, {
+                        status: "in_progress",
+                        parsedArguments: toolCall.arguments,
+                        output: JSON.stringify({ status: "searching web...", query: query })
+                    });
+
+                    try {
+                         // Get location config from Zustand store
+                         const { webSearchConfig } = useToolsStore.getState();
+                         const locationParams = webSearchConfig.user_location;
+
+                         // Construct API URL with query and optional location params
+                         let apiUrl = `/api/functions/web_search_wrapper?query=${encodeURIComponent(query)}`;
+                         if (locationParams?.country) apiUrl += `&country=${encodeURIComponent(locationParams.country)}`;
+                         if (locationParams?.region) apiUrl += `&region=${encodeURIComponent(locationParams.region)}`;
+                         if (locationParams?.city) apiUrl += `&city=${encodeURIComponent(locationParams.city)}`;
+
+                         console.log("Calling web search backend with URL:", apiUrl);
+                         const backendResponse = await fetch(apiUrl);
+                         if (!backendResponse.ok) {
+                             const errorText = await backendResponse.text().catch(() => 'Failed to read error text');
+                             throw new Error(`Backend web search wrapper failed (${backendResponse.status}): ${errorText}`);
+                         }
+                         result = await backendResponse.json();
+                         console.log("Web search wrapper result:", result);
+                         updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
+                    } catch (fetchError) {
+                         console.error("Error calling web_search_wrapper backend:", fetchError);
+                         const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown backend fetch error";
+                         result = { error: errorMsg };
+                         updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
+                    }
+                }
+                
+                // Send result back to Realtime API
+                if (toolCall.call_id) {
+                    sendEvent({
+                        type: "conversation.item.create",
+                        item: {
+                            type: "function_call_output",
+                            call_id: toolCall.call_id,
+                            output: JSON.stringify(result), // Send structured result
+                        },
+                    });
+                    sendEvent({ type: "response.create" }); // Ask assistant to respond
+                } else {
+                     console.warn("No call_id for web_search_wrapper, cannot send result back.", toolCall);
+                }
+                return; // End specific logic for web_search_wrapper
+
+            }
+            // --- End Handle Web Search Wrapper Call --- 
+            else if (toolCall.name === 'web_search') { // Placeholder
                 console.warn("Web search function execution - using placeholder result.");
-                // TODO: Implement actual API call to a backend endpoint for web search
-                // Example:
-                // const query = new URLSearchParams({ query: params.query }).toString();
-                // response = await fetch(`/api/functions/web_search?${query}`);
-                result = { info: `Web search for '${params?.query}' would be performed here.`, results: [] }; // Placeholder
+                result = { info: `Web search for '${params?.query}' would be performed here.`, results: [] };
+                updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
+                 // Return here if web_search is handled differently and doesn't need generic sending below
+                 // return; 
             } else {
+                // Handle truly unknown functions
                 throw new Error(`Unknown tool function: ${toolCall.name}`);
             }
 
-            // --- Process fetch response if result wasn't set directly (placeholder case) ---
-            if (!result && response) {
+            // --- Generic Response Handling (for get_weather, get_joke) --- 
+            if (!result && response) { // Process fetch response if not already handled
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => "Failed to read error response");
                     throw new Error(`Tool API call failed (${response.status}): ${errorText}`);
                 }
                 result = await response.json();
+                 updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
             }
-
-            console.log(`Tool ${toolCall.name} result:`, result);
-            // Update UI with completed status and result
-            updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) }); // Pretty print output
 
         } catch (error) {
             console.error(`Error executing tool ${toolCall.name}:`, error);
             const errorMsg = error instanceof Error ? error.message : "Unknown tool execution error";
             result = { error: errorMsg }; // Set result to an error object
-            // Update UI with failed status and error message
             updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
         }
 
-        // --- Send result back to Realtime API --- 
-        if (toolCall.call_id) { // Only send back if there's a call_id from OpenAI
+        // --- Send result back (Generic for functions like get_weather, get_joke) ---
+        // This block is skipped for file_search_wrapper due to the 'return' statement
+        if (toolCall.call_id && !result?.error) {
             sendEvent({
                 type: "conversation.item.create",
                 item: {
-                    type: "function_call_output", // Correct type based on API error message
+                    type: "function_call_output",
                     call_id: toolCall.call_id,
-                    output: JSON.stringify(result), // Output MUST be a string
+                    output: JSON.stringify(result),
                 },
             });
-            // Optionally trigger immediate response generation after sending tool result
-            sendEvent({ type: "response.create" }); // Re-enable this line
-        } else {
-            console.warn("No call_id found for tool execution, cannot send result back to OpenAI.", toolCall);
+            sendEvent({ type: "response.create" });
+        } else if (!toolCall.call_id) {
+            console.warn("No call_id found for tool execution", toolCall);
+            // UI already updated with failure status in try/catch
         }
 
-    }, [sendEvent]); // Include dependencies for useCallback
+    }, [sendEvent]);
 
     const handleServerEvent = useCallback((event: RealtimeEvent) => {
         // console.log("Handling Server Event:", event.type, event); // Verbose logging
@@ -296,6 +433,20 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                                 } as MessageItem);
                             }
                         }
+                        // --- Handle File Search Call Output ---
+                        else if (outputItem.type === "file_search_call") {
+                            console.log("File search call output received:", outputItem);
+                            // Add an item to the UI to indicate search completion/status
+                            addTranscriptItem({
+                                type: "tool_call",
+                                tool_type: "file_search_call", // Use the new specific type
+                                id: outputItem.id || `fsc-${Date.now()}`, // Use event ID or generate
+                                status: outputItem.status || "completed", // Use status from event
+                                queries: outputItem.queries, // Include queries if available
+                                search_results: outputItem.search_results, // Include results if available
+                                call_id: outputItem.id, // The ID of the file_search_call event
+                            } as FileSearchCallItem); // Cast to the specific UI item type
+                        }
                         // --- Handle other output item types if necessary --- 
                         // e.g., if the response includes final text alongside function calls
                         else if (outputItem.type === "message" && outputItem.role === 'assistant') {
@@ -358,6 +509,61 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             case 'response.content_part.done':
                 // console.log("Received less critical event:", event.type); 
                 break;
+
+            case 'response.audio_transcript.delta':
+            case 'response.audio_transcript.done': {
+                const itemId = event.item_id;
+                const deltaOrText = event.type === 'response.audio_transcript.delta' 
+                    ? event.delta ?? "" 
+                    : event.type === 'response.audio_transcript.done' 
+                        ? event.transcript ?? "" 
+                        : "";
+                const isDone = event.type === 'response.audio_transcript.done';
+
+                if (itemId) {
+                    // Find or create message item
+                    const currentState = useConversationStore.getState();
+                    let messageItem = currentState.chatMessages.find(m => m.id === itemId && m.type === 'message') as MessageItem | undefined;
+                    if (!messageItem) {
+                        messageItem = { type: "message", role: "assistant", id: itemId, content: [{ type: 'output_text', text: '' }] } as MessageItem;
+                        addTranscriptItem(messageItem);
+                    }
+                    // Update text content
+                    updateTranscriptItem(itemId, deltaOrText, !isDone);
+
+                    // --- Handle Annotations --- 
+                    let annotations: any[] | undefined;
+                    if ('annotations' in event && Array.isArray(event.annotations)) {
+                        annotations = event.annotations;
+                    } else if ('content_part' in event && event.content_part && typeof event.content_part === 'object' && 'annotations' in event.content_part && Array.isArray(event.content_part.annotations)) {
+                        annotations = event.content_part.annotations;
+                    } // Add more checks if needed
+                    
+                    if (annotations && annotations.length > 0) {
+                        console.log(`Received ${annotations.length} annotations for item ${itemId}:`, annotations);
+                        useConversationStore.setState((state) => ({
+                            chatMessages: state.chatMessages.map(msg => {
+                                if (msg.id === itemId && msg.type === 'message' && msg.content?.[0]?.type === 'output_text') {
+                                    const existingAnnotations = msg.content[0].annotations || [];
+                                    const uniqueNewAnnotations = annotations!.filter((newAnn: any) => 
+                                        !existingAnnotations.some((exAnn: any) => 
+                                            exAnn.type === newAnn.type && exAnn.index === newAnn.index &&
+                                            exAnn.start_offset === newAnn.start_offset && exAnn.end_offset === newAnn.end_offset
+                                        )
+                                    );
+                                    if (uniqueNewAnnotations.length > 0) {
+                                        const updatedContent = { ...msg.content[0], annotations: [...existingAnnotations, ...uniqueNewAnnotations] };
+                                        return { ...msg, content: [updatedContent] };
+                                    }
+                                }
+                                return msg;
+                            })
+                        }));
+                    }
+                    // --- End Handle Annotations ---
+                }
+                break;
+            }
 
             default:
                  // Use exhaustive check if possible, or log unknowns

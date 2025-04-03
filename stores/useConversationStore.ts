@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { Item, MessageItem, ToolCallItem } from "@/hooks/useHandleRealtimeEvents";
+import { Item, MessageItem } from "@/hooks/useHandleRealtimeEvents";
 import { INITIAL_MESSAGE } from "@/config/constants";
 
 interface ConversationState {

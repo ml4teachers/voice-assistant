@@ -13,7 +13,9 @@ import ChatControls from './ChatControls';
 import Message from './message'; // Assuming this component exists
 import ToolCall from './tool-call'; // Assuming this component exists
 // Use the Item type defined/imported in the hook or centrally
-import { Item, MessageItem, ToolCallItem } from '@/hooks/useHandleRealtimeEvents'; // Adjust path if types moved
+// Import all necessary specific item types
+import { Item, MessageItem, FunctionCallItem, FileSearchCallItem } from '@/hooks/useHandleRealtimeEvents'; // Adjust path if types moved
+import useToolsStore from '@/stores/useToolsStore';
 
 
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
@@ -123,7 +125,22 @@ export default function RealtimeChat() {
             remoteAudioElement.current.setAttribute('playsinline', 'true');
         }
 
-        const connection = await createRealtimeConnection(remoteAudioElement); // Pass audio element ref
+        // Prepare tools list for backend session creation
+        const toolsForBackend = getTools(); // Get the defined tools (incl. file_search wrapper)
+        // Remove tool_resources preparation, no longer needed for backend call
+        /*
+        const { fileSearchEnabled, vectorStore } = useToolsStore.getState();
+        const toolResourcesForBackend = (fileSearchEnabled && vectorStore?.id) 
+            ? { file_search: { vector_store_ids: [vectorStore.id] } } 
+            : null;
+        */
+
+        // Pass ONLY tools list to createRealtimeConnection
+        const connection = await createRealtimeConnection(
+            remoteAudioElement, 
+            toolsForBackend
+            // toolResourcesForBackend // <-- REMOVED
+        );
 
         if (!connection) {
             cleanupConnection("Failed to create WebRTC connection");
@@ -152,7 +169,10 @@ export default function RealtimeChat() {
             setLastError(null); // Clear any previous error on successful connect
 
             // --- Send initial session configuration --- 
-            const tools = getTools();
+            // Get current tool status and vector store from Zustand
+            const { fileSearchEnabled, vectorStore } = useToolsStore.getState();
+            const tools = getTools(); // Get the updated tool list
+
             const initialSessionUpdate = {
                 type: "session.update",
                 session: {
@@ -171,12 +191,10 @@ export default function RealtimeChat() {
                         silence_duration_ms: 800, // Duration of silence to detect end of turn
                         create_response: true, // Automatically trigger response after silence
                     },
-                    // Tools configuration
-                    tools: tools, // Send the generated tool list
-                    // Optionally add vector store IDs if file search requires it here
-                    // vector_store_ids: fileSearchEnabled ? [vectorStore?.id].filter(Boolean) : undefined,
+                    tools: tools, // <-- This should be the ONLY tool configuration parameter
                 },
             };
+            console.log("Sending final session.update payload (only using tools array):", JSON.stringify(initialSessionUpdate, null, 2)); // Finales Logging
             sendEvent(initialSessionUpdate);
 
             // Optional: Send an initial event to potentially greet the user
@@ -276,8 +294,11 @@ export default function RealtimeChat() {
                 <div className="space-y-4">
                     {chatMessages.map((item: Item) => (
                         <React.Fragment key={item.id}> 
+                            {/* Render Message component if item type is message */}
                             {item.type === "message" && <Message message={item as MessageItem} />} 
-                            {item.type === "tool_call" && <ToolCall toolCall={item as ToolCallItem} />} 
+                            {/* Render ToolCall component if item type is tool_call */}
+                            {item.type === "tool_call" && <ToolCall toolCall={item} />} 
+                            {/* Cast inside ToolCall component handles FunctionCallItem/FileSearchCallItem */}
                         </React.Fragment>
                     ))}
                     {/* Display a thinking indicator while connecting or waiting */} 

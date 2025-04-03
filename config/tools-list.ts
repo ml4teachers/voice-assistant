@@ -23,4 +23,29 @@ export const toolsList = [
     description: "Get a programming joke",
     parameters: {},
   },
+  // Add the file search wrapper function definition
+  {
+    name: "file_search_wrapper",
+    description: "Searches the user's knowledge base (uploaded files) for information relevant to the query.",
+    parameters: {
+        query: {
+            type: "string",
+            description: "The specific query or question to search for in the user's files."
+        }
+        // Optional: Add other parameters the wrapper might need
+    },
+  },
+  // Add the web search wrapper function definition
+  {
+    name: "web_search_wrapper",
+    description: "Searches the web for information relevant to the user's query.",
+    parameters: {
+        query: {
+            type: "string",
+            description: "The specific query or question to search the web for."
+        }
+        // Optional: Add location parameters if your backend wrapper uses them
+        // location: { type: "string", description: "User's location (e.g., city, country) for localized results", required: false }
+    },
+  }
 ];

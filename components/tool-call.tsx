@@ -1,15 +1,15 @@
 import React from "react";
 
-import { ToolCallItem } from "@/hooks/useHandleRealtimeEvents";
+import { Item, FunctionCallItem, FileSearchCallItem } from "@/hooks/useHandleRealtimeEvents";
 import { BookOpenText, Clock, Globe, Zap } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 interface ToolCallProps {
-  toolCall: ToolCallItem;
+  toolCall: Item;
 }
 
-function ApiCallCell({ toolCall }: ToolCallProps) {
+function ApiCallCell({ toolCall }: { toolCall: FunctionCallItem }) {
   return (
     <div className="flex flex-col w-[70%] relative mb-[-8px]">
       <div>
@@ -95,19 +95,23 @@ function ApiCallCell({ toolCall }: ToolCallProps) {
   );
 }
 
-function FileSearchCell({ toolCall }: ToolCallProps) {
+function FileSearchCell({ toolCall }: { toolCall: FileSearchCallItem }) {
   return (
     <div className="flex gap-2 items-center text-blue-500 mb-[-16px] ml-[-8px]">
       <BookOpenText size={16} />
       <div className="text-sm font-medium mb-0.5">
         {toolCall.status === "completed"
           ? "Searched files"
-          : "Searching files..."}
+          : toolCall.status === "in_progress"
+             ? "Searching files..."
+             : "File search failed"}
       </div>
     </div>
   );
 }
 
+// Comment out WebSearchCell for now as it's handled by ApiCallCell via the wrapper
+/*
 function WebSearchCell({ toolCall }: ToolCallProps) {
   return (
     <div className="flex gap-2 items-center text-blue-500 mb-[-16px] ml-[-8px]">
@@ -120,11 +124,37 @@ function WebSearchCell({ toolCall }: ToolCallProps) {
     </div>
   );
 }
+*/
+
+// Separate component to render the specific tool call type
+function SpecificToolCall({ toolCall }: { toolCall: FunctionCallItem | FileSearchCallItem }) {
+  switch (toolCall.tool_type) {
+    case "function_call":
+      return <ApiCallCell toolCall={toolCall} />;
+    case "file_search_call":
+      return <FileSearchCell toolCall={toolCall} />;
+    default:
+      // This should ideally not happen if types are correct, but provide fallback
+      const unknownType: never = toolCall; // Use 'never' for exhaustiveness check
+      console.warn("Unknown tool_type for tool_call item:", unknownType);
+      return (
+        <div className="text-xs text-red-500">
+          Unknown Tool Call Type
+        </div>
+      );
+  }
+}
 
 export default function ToolCall({ toolCall }: ToolCallProps) {
+  // Ensure it's a tool_call type before rendering
+  if (toolCall.type !== 'tool_call') {
+    return null;
+  }
+
   return (
     <div className="flex justify-start pt-2">
-      {toolCall.tool_type === "function_call" && <ApiCallCell toolCall={toolCall} />}
+      {/* Pass the correctly typed toolCall to the helper component */}
+      <SpecificToolCall toolCall={toolCall} />
     </div>
   );
 }

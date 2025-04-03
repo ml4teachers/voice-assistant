@@ -117,13 +117,23 @@ export interface ToolParameters {
   // additionalProperties?: boolean; // Check if supported/needed by Realtime API
 }
 
-export interface Tool {
-  type: "function"; // Assuming all tools are functions for now
+// Define specific tool types
+export interface FunctionTool {
+  type: "function";
   name: string;
   description: string;
   parameters?: ToolParameters; // Optional for tools without params
   // strict?: boolean; // Check if supported/needed
 }
+
+export interface FileSearchTool {
+  type: "file_search";
+  vector_store_ids?: string[]; // Configuration specific to file_search
+  name?: string; // Add optional name property
+}
+
+// Union type for all supported tool definitions
+export type Tool = FunctionTool | FileSearchTool;
 
 // --- Tool Call Type (New) ---
 // Represents a function call requested by the model via the DataChannel

@@ -1,10 +1,29 @@
 import { RefObject } from "react";
-import { EphemeralTokenResponse } from '@/components/realtime-types'; // Assuming type is here
+import { EphemeralTokenResponse, Tool } from '@/components/realtime-types'; // Assuming type is here
 
-async function fetchEphemeralKey(): Promise<string | null> {
+// Define type for tool resources configuration - No longer needed here
+/*
+interface ToolResources {
+    file_search?: {
+        vector_store_ids?: string[];
+    };
+}
+*/
+
+// Modify fetchEphemeralKey to accept ONLY tools
+async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Remove tool_resources param
     try {
-        // Use your existing API route
-        const response = await fetch("/api/realtime-session", { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }); // Send empty body or model if needed
+        console.log("Fetching ephemeral key with tools config:", { tools }); // Log only tools
+        // Pass ONLY tools configuration in the request body
+        const response = await fetch("/api/realtime-session", { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ 
+                // Optionally send model if needed 
+                tools: tools, 
+                // tool_resources: tool_resources // <-- REMOVED
+            }) 
+        });
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
             console.error("Error fetching ephemeral key:", response.status, errorData);
@@ -24,9 +43,13 @@ async function fetchEphemeralKey(): Promise<string | null> {
 }
 
 export async function createRealtimeConnection(
-    audioElement: RefObject<HTMLAudioElement | null>
+    audioElement: RefObject<HTMLAudioElement | null>,
+    // Accept ONLY tools configuration as argument
+    tools: Tool[]
+    // tool_resources: ToolResources | null // <-- REMOVED
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> {
-    const ephemeralKey = await fetchEphemeralKey();
+    // Pass ONLY tools configuration to fetchEphemeralKey
+    const ephemeralKey = await fetchEphemeralKey(tools); // Remove tool_resources argument
     if (!ephemeralKey) {
         console.error("Failed to get ephemeral key.");
         return null;

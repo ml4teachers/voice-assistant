@@ -4,7 +4,12 @@ import { NextResponse } from "next/server";
 
 // This route handles the creation of an ephemeral OpenAI API key for the Realtime API session
 export async function POST(request: Request) {
-  const { model = "gpt-4o-mini-realtime-preview" } = await request.json().catch(() => ({}));
+  // Extract model, tools, and tool_resources from the request body
+  const { 
+    model = "gpt-4o-mini-realtime-preview", 
+    tools = [], // Default to empty array if not provided
+    tool_resources = null // Default to null if not provided
+  } = await request.json().catch(() => ({}));
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -26,6 +31,9 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         model: model,
         input_audio_transcription: { model: 'gpt-4o-mini-transcribe' },
+        // Pass tools and tool_resources if they are provided and valid
+        ...(tools && tools.length > 0 && { tools: tools }),
+        ...(tool_resources && { tool_resources: tool_resources }),
       }),
     });
 
