@@ -37,10 +37,10 @@ interface StoreState {
   webSearchConfig: WebSearchConfig;
   setWebSearchConfig: (config: WebSearchConfig) => void;
 
-  // --- Neuer State für Socratic Mode ---
-  isSocraticModeEnabled: boolean;
-  setIsSocraticModeEnabled: (enabled: boolean) => void;
-  // ------------------------------------
+  // --- Remove Socratic Mode State ---
+  // isSocraticModeEnabled: boolean;
+  // setIsSocraticModeEnabled: (enabled: boolean) => void;
+  // ----------------------------------
 }
 
 const useToolsStore = create<StoreState>()(
@@ -72,10 +72,10 @@ const useToolsStore = create<StoreState>()(
       setVectorStore: (store) => set({ vectorStore: store }),
       setWebSearchConfig: (config) => set({ webSearchConfig: config }),
 
-      // --- Initialisierung und Setter für Socratic Mode ---
-      isSocraticModeEnabled: false,
-      setIsSocraticModeEnabled: (enabled) => set({ isSocraticModeEnabled: enabled }),
-      // -------------------------------------------------
+      // --- Remove Socratic Mode Init/Setter ---
+      // isSocraticModeEnabled: false,
+      // setIsSocraticModeEnabled: (enabled) => set({ isSocraticModeEnabled: enabled }),
+      // -----------------------------------------
     }),
     {
       name: "tools-store",

@@ -14,8 +14,8 @@ const geistMono = localFont({
 });
 
 export const metadata: Metadata = {
-  title: "Responses starter app",
-  description: "Starter app for the OpenAI Responses API",
+  title: "Realtime Voice Assistant",
+  description: "Realtime Voice Assistant",
   icons: {
     icon: "/openai_logo.svg",
   },

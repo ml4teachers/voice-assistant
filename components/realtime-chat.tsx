@@ -16,7 +16,7 @@ import ToolCall from './tool-call'; // Assuming this component exists
 // Import all necessary specific item types
 import { Item, MessageItem, FunctionCallItem, FileSearchCallItem } from '@/hooks/useHandleRealtimeEvents'; // Adjust path if types moved
 import useToolsStore from '@/stores/useToolsStore';
-// import { ScrollArea } from "@/components/ui/scroll-area"; // Import ScrollArea - Temporarily commented out
+import useSocraticStore from '@/stores/useSocraticStore'; // Import the Socratic store
 import { cn } from "@/lib/utils"; // Import cn utility
 import { MicIcon } from "lucide-react"; // Import MicIcon for permission button
 
@@ -36,8 +36,8 @@ export default function RealtimeChat() {
     const chatContainerRef = useRef<HTMLDivElement>(null); // Ref for scrolling
     const [micPermission, setMicPermission] = useState<PermissionStatus>("prompt");
     const localStreamRef = useRef<MediaStream | null>(null); // Ref to store the stream
-    // Get Socratic Mode Status from the store directly in the component body
-    const isSocraticModeEnabled = useToolsStore((state) => state.isSocraticModeEnabled);
+    // --- Get Socratic state from the correct store --- 
+    const { isSocraticModeActive, generatedSocraticPrompt } = useSocraticStore();
 
     // Function to send events *to* the DataChannel
     const sendEvent = useCallback((event: any) => {
@@ -235,14 +235,21 @@ export default function RealtimeChat() {
             setSessionStatus('CONNECTED');
             setLastError(null);
 
-            // --- Dynamically select the prompt ---
+            // --- Get the LATEST Socratic state directly inside onopen --- 
+            const latestSocraticState = useSocraticStore.getState();
             const tools = getTools();
-            // Initial prompt: Use DEVELOPER_PROMPT. Socratic prompt will be set via session.update later if mode is active.
-            const currentInstructions = DEVELOPER_PROMPT;
+            let currentInstructions = DEVELOPER_PROMPT; // Default
 
-            // console.log(`Using instructions: ${isSocraticModeEnabled ? 'SOCRATIC' : 'DEVELOPER'}`); // Log statement might be misleading initially
-            console.log(`Initial instructions: DEVELOPER`);
-            // ---------------------------------------
+            if (latestSocraticState.isSocraticModeActive && latestSocraticState.generatedSocraticPrompt) {
+                 console.log("Socratic Mode is Active - Using generated prompt (read at onopen).");
+                 currentInstructions = latestSocraticState.generatedSocraticPrompt;
+            } else if (latestSocraticState.isSocraticModeActive && !latestSocraticState.generatedSocraticPrompt) {
+                 console.warn("Socratic Mode active, but no prompt available at onopen. Using default prompt.");
+                 // Potentially set an error or handle this case?
+            } else {
+                 console.log("Socratic Mode is Inactive - Using developer prompt (read at onopen).");
+            }
+            // -----------------------------------------------------------
 
             const initialSessionUpdate = {
                 type: "session.update",
@@ -251,7 +258,7 @@ export default function RealtimeChat() {
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
                     input_audio_transcription: { model: "whisper-1" },
-                    instructions: currentInstructions, // <-- Use the selected prompt
+                    instructions: currentInstructions, // <-- Use potentially updated instructions
                     voice: "shimmer", // Or another voice like "sage"
                     turn_detection: {
                         type: "server_vad",
@@ -259,11 +266,11 @@ export default function RealtimeChat() {
                         silence_duration_ms: 800,
                         create_response: true,
                     },
-                    tools: tools,
+                    tools: toolsForBackend,
                     // vector_store_ids are handled via wrapper now
                 },
             };
-            console.log("Sending session.update with payload:", JSON.stringify(initialSessionUpdate, null, 2));
+            console.log("Sending final session.update payload (read at onopen):", JSON.stringify(initialSessionUpdate, null, 2));
             sendEvent(initialSessionUpdate);
         };
 
@@ -314,7 +321,8 @@ export default function RealtimeChat() {
         handleServerEventRef,
         rawSetConversation,
         requestMicrophoneAccess,
-        isSocraticModeEnabled
+        isSocraticModeActive,
+        generatedSocraticPrompt
     ]);
 
     // Function to stop the session

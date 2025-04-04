@@ -65,13 +65,13 @@ The project is built using Next.js, TypeScript, Zustand for state management, an
 
 ## Configuration
 
-* **Tools Panel:** Use the side panel (accessible via button) to:
+* **Tools Panel:** Use the side panel (accessible via the button top-left) to:
     * Enable/Disable File Search and link/unlink Vector Stores.
     * Enable/Disable Web Search and configure user location.
     * Enable/Disable custom Functions.
-    * (Soon) Toggle Socratic Mode.
-* **Constants:** Adjust the base model (`MODEL`) or the main prompt (`DEVELOPER_PROMPT`) in `config/constants.ts`.
-* **Functions:** Add or modify custom functions in `config/tools-list.ts` and implement their backend logic in `/app/api/functions/`.
+    * Configure and activate Socratic Mode: Click "Configure Socratic Tutor", select a mode (Assessment/Tutoring), enter a topic focus, and click "Prepare Socratic Session". The system will generate specific instructions based on the linked Vector Store content for the selected topic and mode. Deactivate the mode via the panel when done.
+* **Constants:** Adjust the base model (`MODEL`) or the default developer prompt (`DEVELOPER_PROMPT`) in `config/constants.ts`.
+* **Functions:** Add or modify custom functions in `config/tools-list.ts` and implement their backend logic in `/app/api/functions/`. File/Web Search use wrapper functions.
 
 ## License
 

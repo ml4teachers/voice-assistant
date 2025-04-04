@@ -8,9 +8,10 @@ import useToolsStore from "@/stores/useToolsStore";
 import useSocraticStore from "@/stores/useSocraticStore";
 import { Separator } from "@/components/ui/separator";
 import { ModeToggle } from "@/components/mode-toggle";
-// import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-// import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { BrainCircuit } from "lucide-react";
+import { SocraticConfigDialog } from "./SocraticConfigDialog";
 
 export default function ToolsPanel() {
   const {
@@ -22,22 +23,53 @@ export default function ToolsPanel() {
     setFunctionsEnabled,
   } = useToolsStore();
 
-  const {
+  // --- Read Socratic state primitives individually --- 
+  const isSocraticModeActive = useSocraticStore((state) => state.isSocraticModeActive);
+  const currentSocraticTopic = useSocraticStore((state) => state.currentSocraticTopic);
+  const selectedSocraticMode = useSocraticStore((state) => state.selectedSocraticMode);
+  const setIsSocraticModeActive = useSocraticStore((state) => state.setIsSocraticModeActive);
+  // ---------------------------------------------------
+
+  // --- DEBUGGING LOG --- 
+  console.log("[ToolsPanel Render] Reading Socratic State:", {
     isSocraticModeActive,
-    setIsSocraticModeActive,
-  } = useSocraticStore();
+    currentSocraticTopic,
+    selectedSocraticMode
+  });
+  // ---------------------
 
   return (
     <div className="flex flex-col h-full">
 
-      <PanelConfig
-        title="Socratic Mode"
-        tooltip="Engage in guided learning dialogues using provided context."
-        enabled={isSocraticModeActive}
-        setEnabled={setIsSocraticModeActive}
-      >
-        <span className="text-muted-foreground text-xs">Engage in guided learning dialogues.</span>
-      </PanelConfig>
+      <div className="mb-6 space-y-2">
+          <h1 className="text-foreground font-medium">Assistant Mode</h1>
+          {isSocraticModeActive ? (
+               <div className="p-3 border rounded-md bg-green-100 dark:bg-green-900/30 border-green-300 dark:border-green-700 text-green-800 dark:text-green-200 text-sm space-y-1">
+                   <p className="font-medium">Socratic Mode Active</p>
+                   <p className="text-xs">Topic: {currentSocraticTopic || 'N/A'}</p>
+                   <p className="text-xs">Mode: {selectedSocraticMode || 'N/A'}</p>
+                   <Button 
+                     variant="outline"
+                     size="sm" 
+                     className="mt-2 h-7 text-xs"
+                     onClick={() => setIsSocraticModeActive(false)}
+                    >
+                      Deactivate
+                    </Button>
+               </div>
+           ) : (
+              <Dialog>
+                  <DialogTrigger asChild>
+                      <Button variant="outline" className="w-full justify-start">
+                           <BrainCircuit className="mr-2 h-4 w-4" /> Configure Socratic Tutor
+                      </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-[450px]">
+                      <SocraticConfigDialog />
+                  </DialogContent>
+              </Dialog>
+           )}
+      </div>
 
       <Separator className="my-6" />
 
