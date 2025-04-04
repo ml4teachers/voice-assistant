@@ -7,6 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Button } from "./ui/button";
 import { FilePlus2, Plus, Trash2, CircleX } from "lucide-react";
@@ -28,6 +29,7 @@ interface FileUploadProps {
 
 export default function FileUpload({
   vectorStoreId,
+  vectorStoreName,
   onAddStore,
   onUnlinkStore,
 }: FileUploadProps) {
@@ -179,10 +181,16 @@ export default function FileUpload({
           Upload
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] md:max-w-[600px] max-h-[80vh] overflow-y-auto">
+      <DialogContent 
+        className="sm:max-w-[500px] md:max-w-[600px] max-h-[80vh] overflow-y-auto"
+        aria-describedby="file-upload-description"
+      >
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Add files to your vector store</DialogTitle>
+            <DialogDescription id="file-upload-description">
+              Upload a file to create a new vector store or add to the existing one.
+            </DialogDescription>
           </DialogHeader>
           <div className="my-6">
             {!vectorStoreId || vectorStoreId === "" ? (

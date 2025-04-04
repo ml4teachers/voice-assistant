@@ -19,6 +19,9 @@ interface SocraticState {
   generatedSocraticPrompt: string | null; // The final prompt for the Realtime API
   setGeneratedSocraticPrompt: (prompt: string | null) => void;
 
+  socraticOpenerQuestion: string | null; // The question shown to the user first
+  setSocraticOpenerQuestion: (question: string | null) => void;
+
   isGeneratingPrompt: boolean; // Loading state
   setIsGeneratingPrompt: (isLoading: boolean) => void;
 
@@ -44,6 +47,7 @@ const useSocraticStore = create<SocraticState>()(
             selectedSocraticMode: !isActive && shouldReset ? null : state.selectedSocraticMode,
             retrievedSocraticContext: !isActive && shouldReset ? null : state.retrievedSocraticContext,
             generatedSocraticPrompt: !isActive && shouldReset ? null : state.generatedSocraticPrompt,
+            socraticOpenerQuestion: !isActive && shouldReset ? null : state.socraticOpenerQuestion, // Reset opener on deactivate
             isGeneratingPrompt: false, // Always reset loading state
             // Also reset dialogue state on deactivation
             socraticDialogueState: !isActive && shouldReset ? 'idle' : state.socraticDialogueState
@@ -73,6 +77,12 @@ const useSocraticStore = create<SocraticState>()(
       setGeneratedSocraticPrompt: (prompt) => {
         console.log(`[SocraticStore] setGeneratedSocraticPrompt called (length: ${prompt?.length})`);
         set({ generatedSocraticPrompt: prompt });
+      },
+
+      socraticOpenerQuestion: null, // Initialize opener question
+      setSocraticOpenerQuestion: (question) => { // Add setter for opener question
+        console.log(`[SocraticStore] setSocraticOpenerQuestion called with: ${question}`);
+        set({ socraticOpenerQuestion: question });
       },
 
       isGeneratingPrompt: false,

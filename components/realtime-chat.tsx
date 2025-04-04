@@ -18,7 +18,7 @@ import { Item, MessageItem, FunctionCallItem, FileSearchCallItem } from '@/hooks
 import useToolsStore from '@/stores/useToolsStore';
 import useSocraticStore from '@/stores/useSocraticStore'; // Import the Socratic store
 import { cn } from "@/lib/utils"; // Import cn utility
-import { MicIcon } from "lucide-react"; // Import MicIcon for permission button
+import { MicIcon, MessageSquareQuoteIcon } from "lucide-react"; // Import MicIcon and an icon for the opener
 
 
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
@@ -26,6 +26,11 @@ type PermissionStatus = "prompt" | "granted" | "denied";
 
 export default function RealtimeChat() {
     const { chatMessages, rawSet: rawSetConversation } = useConversationStore(); // Get messages and rawSet from Zustand
+    // --- Individual selectors for Socratic state ---
+    const isSocraticModeActive = useSocraticStore((state) => state.isSocraticModeActive);
+    const generatedSocraticPrompt = useSocraticStore((state) => state.generatedSocraticPrompt);
+    const socraticOpenerQuestion = useSocraticStore((state) => state.socraticOpenerQuestion);
+    // -------------------------------------------
     const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
     const pcRef = useRef<RTCPeerConnection | null>(null);
     const dcRef = useRef<RTCDataChannel | null>(null);
@@ -36,8 +41,6 @@ export default function RealtimeChat() {
     const chatContainerRef = useRef<HTMLDivElement>(null); // Ref for scrolling
     const [micPermission, setMicPermission] = useState<PermissionStatus>("prompt");
     const localStreamRef = useRef<MediaStream | null>(null); // Ref to store the stream
-    // --- Get Socratic state from the correct store --- 
-    const { isSocraticModeActive, generatedSocraticPrompt } = useSocraticStore();
 
     // Function to send events *to* the DataChannel
     const sendEvent = useCallback((event: any) => {
@@ -186,11 +189,12 @@ export default function RealtimeChat() {
         }
 
         // 4. Proceed with Connection Setup
-        console.log("Attempting to start Realtime session (mic granted, stream available)...", { streamId: currentStream.id });
+        console.log("Attempting to start Realtime session (mic granted, stream available)...");
         setIsAssistantSpeaking(false);
         setLastError(null);
         setSessionStatus('CONNECTING');
-        rawSetConversation({ chatMessages: [] });
+        // Clear conversation BUT keep the opener question visible if applicable
+        rawSetConversation({ chatMessages: [] }); 
 
         if (!remoteAudioElement.current) {
             console.log("Creating audio element for playback.");
@@ -202,11 +206,10 @@ export default function RealtimeChat() {
 
         const toolsForBackend = getTools();
 
-        // Pass the now guaranteed valid mediaStream
         const connection = await createRealtimeConnection(
             remoteAudioElement,
             toolsForBackend,
-            currentStream // Use the stream variable we ensured is valid
+            currentStream 
         );
 
         if (!connection) {
@@ -235,21 +238,18 @@ export default function RealtimeChat() {
             setSessionStatus('CONNECTED');
             setLastError(null);
 
-            // --- Get the LATEST Socratic state directly inside onopen --- 
+            // Get the LATEST Socratic state (including the prompt with opener hint)
             const latestSocraticState = useSocraticStore.getState();
-            const tools = getTools();
             let currentInstructions = DEVELOPER_PROMPT; // Default
 
             if (latestSocraticState.isSocraticModeActive && latestSocraticState.generatedSocraticPrompt) {
-                 console.log("Socratic Mode is Active - Using generated prompt (read at onopen).");
+                 console.log("Socratic Mode is Active - Using generated prompt (read at onopen). Includes hint about opener.");
                  currentInstructions = latestSocraticState.generatedSocraticPrompt;
             } else if (latestSocraticState.isSocraticModeActive && !latestSocraticState.generatedSocraticPrompt) {
                  console.warn("Socratic Mode active, but no prompt available at onopen. Using default prompt.");
-                 // Potentially set an error or handle this case?
             } else {
                  console.log("Socratic Mode is Inactive - Using developer prompt (read at onopen).");
             }
-            // -----------------------------------------------------------
 
             const initialSessionUpdate = {
                 type: "session.update",
@@ -257,8 +257,8 @@ export default function RealtimeChat() {
                     modalities: ["audio", "text"],
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
-                    input_audio_transcription: { model: "whisper-1" },
-                    instructions: currentInstructions, // <-- Use potentially updated instructions
+                    input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
+                    instructions: currentInstructions, // This now contains the hint about the opener
                     voice: "shimmer", // Or another voice like "sage"
                     turn_detection: {
                         type: "server_vad",
@@ -321,8 +321,7 @@ export default function RealtimeChat() {
         handleServerEventRef,
         rawSetConversation,
         requestMicrophoneAccess,
-        isSocraticModeActive,
-        generatedSocraticPrompt
+        // No need to depend on socratic state here, it's read inside onopen
     ]);
 
     // Function to stop the session
@@ -389,29 +388,45 @@ export default function RealtimeChat() {
                     />
                 </div>
 
+                {/* ---- Display Opener Question Conditionally ---- */} 
+                {sessionStatus === 'CONNECTED' && isSocraticModeActive && socraticOpenerQuestion && (
+                    <div className="flex-shrink-0 p-4 mb-4 border rounded-md bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700">
+                        <div className="flex items-start space-x-3">
+                            <MessageSquareQuoteIcon className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <p className="font-medium text-sm text-blue-800 dark:text-blue-200">Socratic Tutor asks:</p>
+                                <p className="text-foreground">{socraticOpenerQuestion}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+                {/* ------------------------------------------ */} 
+
                 {/* Transcript Display Area */} 
                 <div 
                     ref={chatContainerRef} 
                     className={cn(
                         "flex-grow rounded-md bg-card", 
-                        "h-0 min-h-[200px]", 
+                        "h-0 min-h-[150px]", // Adjusted min-height slightly
                         "overflow-y-auto p-4 space-y-4" 
                     )}
                 >
-                    {chatMessages.map((item: Item) => (
-                        <React.Fragment key={item.id}> 
-                            {item.type === "message" && <Message message={item as MessageItem} />} 
-                            {item.type === "tool_call" && <ToolCall toolCall={item} />} 
-                        </React.Fragment>
-                    ))}
-                    {sessionStatus === 'CONNECTING' && 
-                        <div className="flex justify-center items-center p-4">
+                    {/* Display "Connecting..." inside if no messages yet and connecting */} 
+                    {chatMessages.length === 0 && sessionStatus === 'CONNECTING' &&
+                        <div className="flex justify-center items-center h-full">
                              <div className="text-center text-muted-foreground italic">Connecting...</div>
                         </div>
                      }
+                    {/* Render actual messages */} 
+                    {chatMessages.map((item: Item) => (
+                        <React.Fragment key={item.id}>
+                            {item.type === "message" && <Message message={item as MessageItem} />}
+                            {item.type === "tool_call" && <ToolCall toolCall={item} />}
+                        </React.Fragment>
+                    ))}
                 </div>
 
-                {/* Audio Element for Playback (Keep it rendered but hidden) */} 
+                {/* Audio Element for Playback */} 
                  <audio ref={remoteAudioElement} hidden playsInline />
              </div>
          </div>

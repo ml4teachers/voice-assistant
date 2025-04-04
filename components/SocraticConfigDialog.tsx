@@ -3,11 +3,10 @@
 import React, { useState } from 'react';
 import { Button } from "@/components/ui/button";
 import {
-    DialogDescription,
     DialogFooter,
     DialogHeader,
     DialogTitle,
-    DialogClose // Import DialogClose
+    DialogClose
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,6 +21,7 @@ import {
 import useToolsStore from '@/stores/useToolsStore'; // To get vectorStoreId
 import useSocraticStore from '@/stores/useSocraticStore'; // To manage Socratic state
 import { cn } from "@/lib/utils";
+import { Loader2 } from 'lucide-react'; // For loading spinner
 
 type SocraticMode = 'Assessment' | 'Tutoring';
 
@@ -32,6 +32,7 @@ export function SocraticConfigDialog() {
         setCurrentSocraticTopic,
         setSelectedSocraticMode,
         setGeneratedSocraticPrompt,
+        setSocraticOpenerQuestion,
         isGeneratingPrompt,
         setIsGeneratingPrompt,
         // Potentially clear context/prompt on open?
@@ -51,6 +52,8 @@ export function SocraticConfigDialog() {
         setError(null);
         setIsGeneratingPrompt(true);
         setProgressValue(10); // Initial progress
+        setGeneratedSocraticPrompt(null);
+        setSocraticOpenerQuestion(null);
 
         try {
             // Simulate progress increase
@@ -77,6 +80,7 @@ export function SocraticConfigDialog() {
             if (data.socraticPrompt) {
                  console.log("Successfully generated Socratic prompt.");
                 setGeneratedSocraticPrompt(data.socraticPrompt);
+                setSocraticOpenerQuestion(data.openerQuestion);
                 setCurrentSocraticTopic(topic);
                 setSelectedSocraticMode(mode as SocraticMode);
                 setIsSocraticModeActive(true);
@@ -100,6 +104,10 @@ export function SocraticConfigDialog() {
             setError(err instanceof Error ? err.message : "An unknown error occurred.");
             setIsGeneratingPrompt(false);
              setProgressValue(0); // Reset progress on error
+            setGeneratedSocraticPrompt(null);
+            setSocraticOpenerQuestion(null);
+            setCurrentSocraticTopic(null);
+            setSelectedSocraticMode(null);
         }
     };
 
@@ -107,15 +115,12 @@ export function SocraticConfigDialog() {
         <> {/* Use Fragment to avoid unnecessary div */}
             <DialogHeader>
                 <DialogTitle>Configure Socratic Tutor</DialogTitle>
-                <DialogDescription>
-                    Set up the topic and mode for the Socratic learning session based on the linked knowledge base.
-                </DialogDescription>
             </DialogHeader>
             
             {/* Conditionally render Form or Loading State */}
             {isGeneratingPrompt ? (
                 // --- Loading State --- 
-                <div className="flex flex-col items-center justify-center gap-3 py-8 min-h-[250px]">
+                <div className="flex flex-col items-center justify-center gap-3 py-8">
                      <Progress value={progressValue} className="w-[80%] h-2" />
                      <p className="text-sm text-muted-foreground text-center mt-1.5">Generating Socratic instructions...</p>
                 </div>
@@ -190,7 +195,7 @@ export function SocraticConfigDialog() {
                      // Disable button also when loading
                      disabled={isGeneratingPrompt || !mode || !topic || !vectorStore?.id}
                  >
-                     {isGeneratingPrompt ? 'Generating...' : 'Prepare Socratic Session'}
+                     {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Prepare Socratic Session'}
                  </Button>
             </DialogFooter>
         </>

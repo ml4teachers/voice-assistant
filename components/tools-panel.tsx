@@ -9,7 +9,7 @@ import useSocraticStore from "@/stores/useSocraticStore";
 import { Separator } from "@/components/ui/separator";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { BrainCircuit } from "lucide-react";
 import { SocraticConfigDialog } from "./SocraticConfigDialog";
 
@@ -29,14 +29,6 @@ export default function ToolsPanel() {
   const selectedSocraticMode = useSocraticStore((state) => state.selectedSocraticMode);
   const setIsSocraticModeActive = useSocraticStore((state) => state.setIsSocraticModeActive);
   // ---------------------------------------------------
-
-  // --- DEBUGGING LOG --- 
-  console.log("[ToolsPanel Render] Reading Socratic State:", {
-    isSocraticModeActive,
-    currentSocraticTopic,
-    selectedSocraticMode
-  });
-  // ---------------------
 
   return (
     <div className="flex flex-col h-full">
@@ -64,7 +56,13 @@ export default function ToolsPanel() {
                            <BrainCircuit className="mr-2 h-4 w-4" /> Configure Socratic Tutor
                       </Button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-[450px]">
+                  <DialogContent 
+                    className="sm:max-w-[450px]"
+                    aria-describedby="socratic-config-description"
+                  >
+                      <DialogDescription id="socratic-config-description" className="sr-only">
+                        Configure Socratic tutor mode, topic, and knowledge base.
+                      </DialogDescription>
                       <SocraticConfigDialog />
                   </DialogContent>
               </Dialog>

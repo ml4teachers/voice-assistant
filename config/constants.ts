@@ -21,6 +21,6 @@ Hi, how can I help you?
 `;
 
 export const defaultVectorStore = {
-  id: "",
-  name: "Example",
+  id: "vs_67ed356beb648191917946f9cda5df16",
+  name: "Socratic Tutor",
 };

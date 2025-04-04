@@ -9,7 +9,7 @@ import {
     SheetHeader,
     SheetTitle,
     SheetTrigger,
-    // SheetDescription, // Optional
+    SheetDescription,
     // SheetFooter, // Optional
     // SheetClose, // Optional
 } from "@/components/ui/sheet";
@@ -39,7 +39,9 @@ export default function Main() {
                   {/* Header within the sheet */}
                   <SheetHeader className="p-6 pb-4 border-b"> 
                       <SheetTitle>Configuration</SheetTitle>
-                      {/* Optional: <SheetDescription>Adjust assistant settings.</SheetDescription> */} 
+                      <SheetDescription>
+                          Adjust assistant settings and configure tools.
+                      </SheetDescription>
                   </SheetHeader>
                   {/* Content area for the ToolsPanel component */}
                   <div className="p-6 pt-4">
