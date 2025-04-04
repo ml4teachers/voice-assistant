@@ -499,15 +499,39 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                 console.log("Full response done event received:", event.response);
                 if (event.response?.output) {
                     event.response.output.forEach((outputItem: any) => {
-                        if (outputItem.type === "function_call" /* && !outputItem.call_id?.startsWith('socratic-ctx-') */ ) {
-                            // Standard function call execution (already handled by logic above?)
-                            // Ensure executeToolFunction is called if not already
-                        } else if (outputItem.type === "file_search_call") {
-                            // This event signals the *API's* file search is done. 
-                            // We use file_search_wrapper, so this might not be directly relevant unless 
-                            // the API itself was instructed to do a file search directly.
+                        // --- Trigger standard function calls --- 
+                        if (outputItem.type === "function_call" && outputItem.name && outputItem.arguments) {
+                            // Check if this is NOT the internal socratic context fetch
+                            if (!outputItem.call_id?.startsWith('socratic-ctx-')) {
+                                try {
+                                    const parsedArgs = JSON.parse(outputItem.arguments);
+                                    // Construct ToolCall object for execution
+                                    const toolCallData: ToolCall = {
+                                        type: "function_call",
+                                        name: outputItem.name,
+                                        arguments: parsedArgs, // Pass parsed arguments
+                                        call_id: outputItem.call_id, // Essential for sending result back
+                                        // Attempt to associate with a response item ID if available
+                                        item_id: outputItem.item_id || event.response?.id || `tool-${outputItem.call_id || Date.now()}`
+                                    };
+                                    console.log(`[response.done] Triggering executeToolFunction for: ${toolCallData.name}`);
+                                    executeToolFunction(toolCallData);
+                                } catch (parseError) {
+                                    console.error("[response.done] Failed to parse function call arguments:", parseError, outputItem.arguments);
+                                    // Add error message to UI?
+                                    addTranscriptItem({
+                                        type: "message", role: "system", id: `error-parse-${Date.now()}`,
+                                        content: [{ type: 'output_text', text: `Error parsing tool arguments for ${outputItem.name}` }]
+                                    } as MessageItem);
+                                }
+                            } else {
+                                console.log("[response.done] Skipping internal Socratic context fetch trigger.");
+                            }
+                        }
+                        // --- Handle API File Search Call Output (If API does search directly) ---
+                        else if (outputItem.type === "file_search_call") {
+                            console.log("API File search call output received in response.done:", outputItem);
                             // Add UI update for API-driven file search if needed.
-                             console.log("API File search call output received in response.done:", outputItem);
                              addTranscriptItem({ // Example UI update
                                  type: "tool_call",
                                  tool_type: "file_search_call", 
@@ -518,6 +542,8 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                                  call_id: outputItem.id,
                              } as FileSearchCallItem);
                         }
+                        // --- Handle other output types if necessary --- 
+                        // else if (outputItem.type === "message" && ...) { ... }
                     });
                 }
                 break;

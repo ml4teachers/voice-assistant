@@ -1,94 +1,109 @@
 import React from "react";
 
 import { Item, FunctionCallItem, FileSearchCallItem } from "@/hooks/useHandleRealtimeEvents";
-import { BookOpenText, Clock, Globe, Zap } from "lucide-react";
+import { BookOpenText, Clock, Globe, Zap, Loader2 } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { coy } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { useTheme } from "next-themes";
 
 interface ToolCallProps {
   toolCall: Item;
 }
 
 function ApiCallCell({ toolCall }: { toolCall: FunctionCallItem }) {
+  const { theme } = useTheme();
+  const syntaxTheme = theme === 'dark' ? oneDark : oneLight;
+
+  const showSpinner = toolCall.status === 'in_progress';
+
   return (
-    <div className="flex flex-col w-[70%] relative mb-[-8px]">
+    <div className="flex flex-col w-[85%] relative mb-2 text-sm">
       <div>
-        <div className="flex flex-col text-sm rounded-[16px]">
-          <div className="font-semibold p-3 pl-0 text-gray-700 rounded-b-none flex gap-2">
-            <div className="flex gap-2 items-center text-blue-500 ml-[-8px]">
-              <Zap size={16} />
-              <div className="text-sm font-medium">
-                {toolCall.status === "completed"
-                  ? `Called ${toolCall.name}`
-                  : `Calling ${toolCall.name}...`}
-              </div>
+        <div className="flex flex-col rounded-md border bg-card p-3 shadow-sm">
+          <div className="flex items-center gap-2 mb-2 pb-2 border-b">
+            <Zap size={16} className="text-primary flex-shrink-0" />
+            <div className="font-medium text-foreground">
+              {toolCall.status === "completed"
+                ? `Called: ${toolCall.name}`
+                : toolCall.status === "failed"
+                  ? `Failed: ${toolCall.name}`
+                  : `Calling: ${toolCall.name}...`}
             </div>
+            {showSpinner && <Loader2 size={16} className="animate-spin text-muted-foreground ml-auto" />}
           </div>
 
-          <div className="bg-[#fafafa] rounded-xl py-2 ml-4 mt-2">
-            <div className="max-h-96 overflow-y-scroll text-xs border-b mx-6 p-2">
+          <div className="mb-2">
+            <div className="text-xs font-medium text-muted-foreground mb-1">Arguments:</div>
+            <div className="max-h-48 overflow-y-auto rounded bg-muted/50 p-2">
               <SyntaxHighlighter
-                customStyle={{
-                  backgroundColor: "#fafafa",
-                  padding: "8px",
-                  paddingLeft: "0px",
-                  marginTop: 0,
-                  marginBottom: 0,
-                }}
                 language="json"
-                style={coy}
+                style={syntaxTheme}
+                customStyle={{
+                  backgroundColor: "transparent",
+                  padding: "0px",
+                  margin: 0,
+                  fontSize: "0.75rem",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                }}
               >
-                {JSON.stringify(toolCall.parsedArguments, null, 2)}
+                {JSON.stringify(toolCall.parsedArguments ?? {}, null, 2) || "{}"}
               </SyntaxHighlighter>
             </div>
-            <div className="max-h-96 overflow-y-scroll mx-6 p-2 text-xs">
-              {toolCall.output ? (
-                (() => {
-                  try {
-                    const parsedOutput = JSON.parse(toolCall.output);
-
-                    // Specific handling for errors returned by tools
-                    if (parsedOutput?.error) {
-                        return (
-                            <div className="whitespace-pre-wrap p-2 text-red-600">
-                                Error: {parsedOutput.error}
-                            </div>
-                        );
-                    }
-
-                    // Fallback for other successful tool calls: Show formatted JSON
-                    return (
-                      <SyntaxHighlighter
-                        customStyle={{
-                          backgroundColor: "#fafafa",
-                          padding: "8px",
-                          paddingLeft: "0px",
-                          marginTop: 0,
-                        }}
-                        language="json"
-                        style={coy}
-                      >
-                        {JSON.stringify(parsedOutput, null, 2)}
-                      </SyntaxHighlighter>
-                    );
-                  } catch (e) {
-                    // Fallback if output is not valid JSON
-                    console.error("Failed to parse tool output:", e);
-                    return (
-                       <div className="whitespace-pre-wrap p-2 text-orange-600">
-                           Raw Output (JSON parse failed):
-                           {toolCall.output}
-                       </div>
-                    )
-                  }
-                })()
-              ) : (
-                <div className="text-zinc-500 flex items-center gap-2 py-2">
-                  <Clock size={16} /> Waiting for result...
-                </div>
-              )}
-            </div>
           </div>
+
+          <div>
+             <div className="text-xs font-medium text-muted-foreground mb-1">Result:</div>
+             <div className="max-h-60 overflow-y-auto rounded bg-muted/50 p-2 text-xs">
+               {toolCall.status === 'in_progress' ? (
+                  <div className="flex items-center gap-2 text-muted-foreground italic">
+                     <Clock size={14} /> Waiting for result...
+                  </div>
+               ) : toolCall.output ? (
+                  (() => {
+                    try {
+                      const parsedOutput = JSON.parse(toolCall.output);
+                      const isError = parsedOutput?.error;
+
+                      return (
+                        <SyntaxHighlighter
+                          language={isError ? "text" : "json"}
+                          style={syntaxTheme}
+                          customStyle={{
+                            backgroundColor: "transparent",
+                            padding: "0px",
+                            margin: 0,
+                            fontSize: "0.75rem",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                            color: isError ? (theme === 'dark' ? 'hsl(var(--destructive-foreground))' : 'hsl(var(--destructive))') : undefined,
+                          }}
+                        >
+                          {isError ? parsedOutput.error : JSON.stringify(parsedOutput, null, 2)}
+                        </SyntaxHighlighter>
+                      );
+                    } catch (e) {
+                       // Fallback for non-JSON output (or parse error)
+                      return (
+                         <div className="whitespace-pre-wrap text-orange-600 dark:text-orange-400">
+                             Raw Output (JSON parse failed):
+                             <pre>{toolCall.output}</pre>
+                         </div>
+                      );
+                    }
+                  })()
+               ) : toolCall.status === 'failed' ? (
+                  <div className="text-destructive italic">
+                      Execution failed (no specific output).
+                  </div>
+               ) : (
+                  <div className="text-muted-foreground italic">
+                      Completed (no specific output).
+                  </div>
+               )}
+            </div>
+           </div>
+
         </div>
       </div>
     </div>
@@ -96,16 +111,18 @@ function ApiCallCell({ toolCall }: { toolCall: FunctionCallItem }) {
 }
 
 function FileSearchCell({ toolCall }: { toolCall: FileSearchCallItem }) {
+  const showSpinner = toolCall.status === 'in_progress';
   return (
-    <div className="flex gap-2 items-center text-blue-500 mb-[-16px] ml-[-8px]">
-      <BookOpenText size={16} />
-      <div className="text-sm font-medium mb-0.5">
+    <div className="flex items-center gap-2 text-primary mb-1 ml-[-4px]">
+      <BookOpenText size={16} className="flex-shrink-0" />
+      <div className="text-sm font-medium text-foreground">
         {toolCall.status === "completed"
           ? "Searched files"
           : toolCall.status === "in_progress"
              ? "Searching files..."
              : "File search failed"}
       </div>
+       {showSpinner && <Loader2 size={16} className="animate-spin text-muted-foreground ml-1" />}
     </div>
   );
 }
@@ -132,7 +149,10 @@ function SpecificToolCall({ toolCall }: { toolCall: FunctionCallItem | FileSearc
     case "function_call":
       return <ApiCallCell toolCall={toolCall} />;
     case "file_search_call":
-      return <FileSearchCell toolCall={toolCall} />;
+      if (!toolCall.call_id?.startsWith('socratic-ctx-')) {
+          return <FileSearchCell toolCall={toolCall} />;
+      }
+      return null;
     default:
       // This should ideally not happen if types are correct, but provide fallback
       const unknownType: never = toolCall; // Use 'never' for exhaustiveness check

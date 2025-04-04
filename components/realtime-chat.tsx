@@ -151,36 +151,44 @@ export default function RealtimeChat() {
 
     }, []); // Dependencies: state setters if they cause issues, but likely fine
 
-    // Function to start the session - Modified to use dynamic prompt
+    // Function to start the session - Modified to handle stream acquisition properly
     const startSession = useCallback(async () => {
-        // Ensure permission is granted before proceeding
+        // 1. Check Mic Permission First
         if (micPermission !== "granted") {
             console.warn("Microphone permission not granted. Cannot start session.");
-            // Optionally trigger the request here, or rely on the button
-             // requestMicrophoneAccess(); 
-             setLastError("Please grant microphone permission first.");
+            setLastError("Please grant microphone permission first.");
+            // Optionally trigger request here if not already prompted by UI
+            // if (micPermission === 'prompt') await requestMicrophoneAccess();
             return;
         }
 
-        // Ensure we have a valid stream (it should be in localStreamRef if permission is granted)
-        if (!localStreamRef.current) {
-             console.error("Permission granted, but media stream is missing. Attempting to re-acquire.");
-             // Try to re-acquire - this might happen if permission was granted before page load
-             const stream = await requestMicrophoneAccess(); 
-             if (!stream) { 
-                 cleanupConnection("Failed to acquire media stream after permission grant.");
-                 return; 
-             }
-             localStreamRef.current = stream;
+        // 2. Ensure we have a MediaStream
+        let currentStream = localStreamRef.current;
+        if (!currentStream) {
+            console.warn("Permission granted, but media stream reference is missing. Attempting to acquire...");
+            currentStream = await requestMicrophoneAccess(); // Await the acquisition
+            if (!currentStream) {
+                // Request failed or was denied again
+                console.error("Failed to acquire media stream even after permission was granted.");
+                cleanupConnection("Failed to acquire necessary media stream.");
+                // setLastError is handled by requestMicrophoneAccess or cleanupConnection
+                return;
+            }
+            // Store the newly acquired stream
+            localStreamRef.current = currentStream;
+            console.log("Media stream acquired and stored in ref.");
         }
 
+        // 3. Check Session Status
         if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
             console.warn("Session already connecting or connected.");
             return;
         }
-        console.log("Attempting to start Realtime session (mic granted)...");
+
+        // 4. Proceed with Connection Setup
+        console.log("Attempting to start Realtime session (mic granted, stream available)...", { streamId: currentStream.id });
         setIsAssistantSpeaking(false);
-        setLastError(null); 
+        setLastError(null);
         setSessionStatus('CONNECTING');
         rawSetConversation({ chatMessages: [] });
 
@@ -193,12 +201,12 @@ export default function RealtimeChat() {
         }
 
         const toolsForBackend = getTools();
-        
-        // Pass the acquired mediaStream to createRealtimeConnection
+
+        // Pass the now guaranteed valid mediaStream
         const connection = await createRealtimeConnection(
             remoteAudioElement,
             toolsForBackend,
-            localStreamRef.current! // Assert non-null after checks
+            currentStream // Use the stream variable we ensured is valid
         );
 
         if (!connection) {
@@ -306,7 +314,7 @@ export default function RealtimeChat() {
         handleServerEventRef,
         rawSetConversation,
         requestMicrophoneAccess,
-        isSocraticModeEnabled // <-- Add isSocraticModeEnabled to dependency array
+        isSocraticModeEnabled
     ]);
 
     // Function to stop the session
