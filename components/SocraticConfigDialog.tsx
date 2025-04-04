@@ -35,8 +35,8 @@ export function SocraticConfigDialog() {
         setSocraticOpenerQuestion,
         isGeneratingPrompt,
         setIsGeneratingPrompt,
-        // Potentially clear context/prompt on open?
-        // setRetrievedSocraticContext,
+        setSessionExpectations,
+        setSessionMisconceptions,
     } = useSocraticStore();
 
     const [topic, setTopic] = useState('');
@@ -54,6 +54,8 @@ export function SocraticConfigDialog() {
         setProgressValue(10); // Initial progress
         setGeneratedSocraticPrompt(null);
         setSocraticOpenerQuestion(null);
+        setSessionExpectations([]);
+        setSessionMisconceptions([]);
 
         try {
             // Simulate progress increase
@@ -77,14 +79,45 @@ export function SocraticConfigDialog() {
             }
 
             const data = await response.json();
-            if (data.socraticPrompt) {
-                 console.log("Successfully generated Socratic prompt.");
+            if (data.socraticPrompt && data.openerQuestion) {
+                 console.log("Successfully generated Socratic prompt and opener.");
                 setGeneratedSocraticPrompt(data.socraticPrompt);
                 setSocraticOpenerQuestion(data.openerQuestion);
                 setCurrentSocraticTopic(topic);
                 setSelectedSocraticMode(mode as SocraticMode);
                 setIsSocraticModeActive(true);
                 setProgressValue(100); // Set to complete
+
+                // --- NEU: Parse E/M from prompt ---
+                try {
+                    const promptText = data.socraticPrompt as string;
+                    const expectationsMatch = promptText.match(/<EXPECTATIONS>([\s\S]*?)<\/EXPECTATIONS>/);
+                    const misconceptionsMatch = promptText.match(/<MISCONCEPTIONS>([\s\S]*?)<\/MISCONCEPTIONS>/);
+
+                    const parseList = (match: RegExpMatchArray | null): string[] => {
+                        if (!match || !match[1]) return [];
+                        return match[1]
+                            .split('\n') // Split by newline
+                            .map(line => line.trim()) // Trim whitespace
+                            .map(line => line.startsWith('- ') ? line.substring(2).trim() : line.trim()) // Remove leading "- "
+                            .filter(line => line.length > 0); // Remove empty lines
+                    };
+
+                    const expectations = parseList(expectationsMatch);
+                    const misconceptions = parseList(misconceptionsMatch);
+
+                    console.log("Parsed Expectations:", expectations);
+                    console.log("Parsed Misconceptions:", misconceptions);
+                    setSessionExpectations(expectations);
+                    setSessionMisconceptions(misconceptions);
+
+                } catch (parseError) {
+                     console.error("Could not parse Expectations/Misconceptions from generated prompt:", parseError);
+                     // Set empty arrays or handle error
+                     setSessionExpectations([]);
+                     setSessionMisconceptions([]);
+                }
+                // --- Ende Parsing ---
 
                  // Close dialog after a short delay (optional)
                  setTimeout(() => {
@@ -96,7 +129,7 @@ export function SocraticConfigDialog() {
                  }, 500);
 
             } else {
-                throw new Error("Backend did not return a valid prompt.");
+                throw new Error("Backend did not return a valid prompt or opener question.");
             }
 
         } catch (err) {
@@ -108,6 +141,8 @@ export function SocraticConfigDialog() {
             setSocraticOpenerQuestion(null);
             setCurrentSocraticTopic(null);
             setSelectedSocraticMode(null);
+            setSessionExpectations([]);
+            setSessionMisconceptions([]);
         }
     };
 
@@ -120,7 +155,7 @@ export function SocraticConfigDialog() {
             {/* Conditionally render Form or Loading State */}
             {isGeneratingPrompt ? (
                 // --- Loading State --- 
-                <div className="flex flex-col items-center justify-center gap-3 py-8">
+                <div className="flex flex-col items-center justify-center gap-3 py-8 min-h-[250px]">
                      <Progress value={progressValue} className="w-[80%] h-2" />
                      <p className="text-sm text-muted-foreground text-center mt-1.5">Generating Socratic instructions...</p>
                 </div>

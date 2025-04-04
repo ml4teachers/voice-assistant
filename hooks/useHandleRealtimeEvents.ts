@@ -5,8 +5,9 @@ import useConversationStore from "@/stores/useConversationStore";
 // If not, define a placeholder type here.
 import { Annotation } from "@/components/annotations";
 import useToolsStore from "@/stores/useToolsStore";
-import useSocraticStore from "@/stores/useSocraticStore"; // Import the new Socratic store
-import { getSocraticPromptForTopic } from '@/config/socratic-prompt'; // Import the prompt generator
+import useSocraticStore, { SocraticEvaluation } from "@/stores/useSocraticStore"; // Import the new Socratic store
+// Remove getSocraticPromptForTopic as prompt generation is now fully backend driven
+// import { getSocraticPromptForTopic } from '@/config/socratic-prompt';
 
 // --- Temporary Type Definitions (replace imports from @/lib/assistant) ---
 // Define placeholder types here. Refine or move to a central types file later.
@@ -92,12 +93,11 @@ const updateTranscriptItem = (itemId: string, newText: string, append: boolean) 
 /**
  * Updates specific properties of a tool call item.
  */
-const updateToolCallItem = (itemId: string, updates: Partial<FunctionCallItem>) => {
+const updateToolCallItem = (itemId: string, updates: Partial<FunctionCallItem | FileSearchCallItem>) => {
     useConversationStore.setState((state) => ({
         chatMessages: state.chatMessages.map(item => {
             if (item.id === itemId && item.type === 'tool_call') {
-                // Merge existing item with updates
-                return { ...item, ...updates } as FunctionCallItem;
+                return { ...item, ...updates } as Item; // Use Item type assertion
             }
             return item;
         })
@@ -116,26 +116,27 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
         socraticDialogueState,
         setRetrievedSocraticContext,
         setSocraticDialogueState,
-        setCurrentSocraticTopic // Add setter for topic if needed here
-    } = useSocraticStore();
+        setCurrentSocraticTopic, // Add setter for topic if needed here
+        setCurrentTurnEvaluation,
+        addCoveredExpectation,
+        addEncounteredMisconception
+    } = useSocraticStore.getState();
 
     const executeToolFunction = useCallback(async (toolCall: ToolCall) => {
         const toolCallUiId = toolCall.item_id || `tool-${toolCall.call_id || Date.now()}`;
         console.log(`Executing tool: ${toolCall.name}`, toolCall.arguments);
 
-        // Add initial tool call item to UI (if not triggered internally for context)
-        if (!toolCall.call_id?.startsWith('socratic-ctx-')) { // Avoid showing internal context fetch in UI
-            addTranscriptItem({
-                type: "tool_call",
-                id: toolCallUiId,
-                tool_type: "function_call",
-                status: "in_progress",
-                name: toolCall.name,
-                arguments: JSON.stringify(toolCall.arguments),
-                parsedArguments: toolCall.arguments,
-                call_id: toolCall.call_id,
-            } as FunctionCallItem);
-        }
+        // Add initial tool call item to UI
+        addTranscriptItem({
+            type: "tool_call",
+            id: toolCallUiId,
+            tool_type: "function_call",
+            status: "in_progress",
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.arguments),
+            parsedArguments: toolCall.arguments,
+            call_id: toolCall.call_id,
+        } as FunctionCallItem);
 
         let result: any;
         try {
@@ -148,33 +149,26 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             } else if (toolCall.name === 'get_joke') {
                 response = await fetch(`/api/functions/get_joke`);
             }
-            // --- Handle File Search Wrapper Call --- 
+            // --- File Search Wrapper Call ---
             else if (toolCall.name === 'file_search_wrapper') {
                 console.log("File search wrapper function called:", toolCall.arguments);
                 const query = toolCall.arguments?.query;
-                const isSocraticContextFetch = toolCall.call_id?.startsWith('socratic-ctx-');
 
                 if (!query) {
                     result = { error: "Missing query for file search wrapper" };
                     console.error(result.error);
-                    if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
-                    // If Socratic context fetch failed, reset state?
-                    if (isSocraticContextFetch) setSocraticDialogueState('idle');
+                    updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
                 } else {
-                    if (!isSocraticContextFetch) {
-                        updateToolCallItem(toolCallUiId, {
-                            status: "in_progress",
-                            parsedArguments: toolCall.arguments,
-                            output: JSON.stringify({ status: "calling backend wrapper...", query: query })
-                        });
-                    }
-
+                    updateToolCallItem(toolCallUiId, {
+                        status: "in_progress",
+                        parsedArguments: toolCall.arguments,
+                        output: JSON.stringify({ status: "calling backend wrapper...", query: query })
+                    });
                     const currentVectorStoreId = useToolsStore.getState().vectorStore?.id;
                     if (!currentVectorStoreId) {
                         result = { error: "No vector store configured in client state" };
                         console.error(result.error);
-                        if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
-                        if (isSocraticContextFetch) setSocraticDialogueState('idle');
+                        updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
                     } else {
                         try {
                             const apiUrl = `/api/functions/file_search_wrapper?query=${encodeURIComponent(query)}&vectorStoreId=${encodeURIComponent(currentVectorStoreId)}`;
@@ -183,47 +177,19 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                                 const errorText = await backendResponse.text().catch(() => 'Failed to read error text');
                                 throw new Error(`Backend wrapper failed (${backendResponse.status}): ${errorText}`);
                             }
-                            result = await backendResponse.json(); // Result = { answer: "...", annotations: [...] }
+                            result = await backendResponse.json();
                             console.log("File search wrapper result from backend:", result);
-
-                            // ---- Store context IF it was a Socratic context fetch ----
-                            if (isSocraticContextFetch && useSocraticStore.getState().currentSocraticTopic === query) {
-                                const contextText = result?.answer || "Could not retrieve relevant context.";
-                                setRetrievedSocraticContext(contextText);
-                                console.log("Socratic context stored.");
-
-                                // Generate the specific prompt
-                                const topic = useSocraticStore.getState().currentSocraticTopic!;
-                                const fullSocraticPrompt = getSocraticPromptForTopic(topic, contextText);
-
-                                // Send the new prompt to the session
-                                sendEvent({
-                                    type: "session.update",
-                                    session: { instructions: fullSocraticPrompt }
-                                });
-                                console.log("Sent updated Socratic instructions to session.");
-
-                                // Set state to trigger the first question
-                                setSocraticDialogueState('ready_to_ask');
-                                sendEvent({ type: "response.create" });
-                                console.log("Requested initial Socratic question.");
-                            } else if (!isSocraticContextFetch) {
-                                // Update UI only for non-Socratic fetches
-                                updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
-                            }
-                            // ---------------------------------------------------------
-
+                            updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
                         } catch (fetchError) {
                             console.error("Error calling file_search_wrapper backend:", fetchError);
                             const errorMsg = fetchError instanceof Error ? fetchError.message : "Unknown backend fetch error";
                             result = { error: errorMsg };
-                            if (!isSocraticContextFetch) updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
-                            if (isSocraticContextFetch) setSocraticDialogueState('idle'); // Reset state on error
+                            updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
                         }
                     }
                 }
-                // Send the result back ONLY for NON-SOCRATIC calls
-                if (toolCall.call_id && !isSocraticContextFetch) {
+                // Send the result back
+                if (toolCall.call_id) {
                     sendEvent({
                         type: "conversation.item.create",
                         item: {
@@ -233,13 +199,10 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                         },
                     });
                     sendEvent({ type: "response.create" });
-                } else if (!toolCall.call_id && !isSocraticContextFetch) {
-                    console.warn("No call_id for non-Socratic file_search_wrapper.", toolCall);
                 }
                 return; // Prevent subsequent generic result handling
-
             }
-            // --- Handle Web Search Wrapper Call --- 
+            // --- Handle Web Search Wrapper Call ---
             else if (toolCall.name === 'web_search_wrapper') {
                 console.log("Web search wrapper function called:", toolCall.arguments);
                 const query = toolCall.arguments?.query;
@@ -301,19 +264,17 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                 return; // End specific logic for web_search_wrapper
 
             }
-            // --- End Handle Web Search Wrapper Call --- 
-            else if (toolCall.name === 'web_search') { // Placeholder
+            else if (toolCall.name === 'web_search') {
+                // Placeholder - no change needed
                 console.warn("Web search function execution - using placeholder result.");
                 result = { info: `Web search for '${params?.query}' would be performed here.`, results: [] };
                 updateToolCallItem(toolCallUiId, { status: "completed", output: JSON.stringify(result, null, 2) });
-                 // Return here if web_search is handled differently and doesn't need generic sending below
-                 // return; 
             } else {
                 // Handle truly unknown functions
                 throw new Error(`Unknown tool function: ${toolCall.name}`);
             }
 
-            // --- Generic Response Handling (for get_weather, get_joke) --- 
+            // --- Generic Response Handling (for get_weather, get_joke, web_search placeholder) ---
             if (!result && response) { // Process fetch response if not already handled
                 if (!response.ok) {
                     const errorText = await response.text().catch(() => "Failed to read error response");
@@ -330,24 +291,25 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             updateToolCallItem(toolCallUiId, { status: "failed", output: JSON.stringify(result) });
         }
 
-        // --- Send result back (Generic for functions like get_weather, get_joke) ---
-        // This block is skipped for file_search_wrapper due to the 'return' statement
-        if (toolCall.call_id && !result?.error) {
+        // --- Send result back (Generic for functions like get_weather, get_joke, web_search) ---
+        if (toolCall.call_id) { // Always try to send if call_id exists
             sendEvent({
                 type: "conversation.item.create",
                 item: {
                     type: "function_call_output",
                     call_id: toolCall.call_id,
-                    output: JSON.stringify(result),
+                    output: JSON.stringify(result), // Send result or error
                 },
             });
-            sendEvent({ type: "response.create" });
-        } else if (!toolCall.call_id) {
+             // Only request response if the tool call was successful
+             if (!result?.error) {
+                 sendEvent({ type: "response.create" });
+             }
+        } else {
             console.warn("No call_id found for tool execution", toolCall);
-            // UI already updated with failure status in try/catch
         }
 
-    }, [sendEvent, setRetrievedSocraticContext, setSocraticDialogueState]);
+    }, [sendEvent]);
 
     // --- Effect to Trigger Context Retrieval --- 
     useEffect(() => {
@@ -402,19 +364,6 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                         type: "message", role: "user", id: item.id, 
                         content: [{ type: 'input_text', text }] 
                     } as MessageItem);
-
-                    // --- Socratic Topic Setting Logic --- 
-                    const socraticState = useSocraticStore.getState(); // Get current Socratic state
-                    if (socraticState.isSocraticModeActive && !socraticState.currentSocraticTopic && socraticState.socraticDialogueState === 'idle') {
-                         // Assumption: First user message after activating Socratic mode sets the topic
-                         // More robust: Could wait for transcription complete event or specific phrase?
-                        if (text !== "[Transcribing...]") { // Wait for some actual text
-                            console.log("Socratic Mode: Setting topic from first user message:", text);
-                             setCurrentSocraticTopic(text); // Use the user message as the topic
-                             setSocraticDialogueState('retrieving_context'); // Trigger context retrieval
-                        }
-                    }
-                    // -------------------------------------
                 }
                 // Handle assistant messages
                 else if (item.type === 'message' && item.role === 'assistant' && item.id) {
@@ -475,12 +424,87 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
             case "response.audio_transcript.done": {
                 const itemId = event.item_id;
-                console.log("Assistant transcript done for item:", itemId, event.transcript);
-                if (itemId && event.transcript) {
-                    updateTranscriptItem(itemId, event.transcript, false); // Replace with final transcript
-                    // Optionally add to a separate conversation history for API calls if needed
-                    // useConversationStore.getState().addConversationItem({ role: 'assistant', content: event.transcript });
+                const finalTranscript = event.transcript ?? "";
+                console.log(`Assistant transcript done (ID: ${itemId}):`, finalTranscript);
+        
+                if (!itemId) break;
+        
+                // --- NEU: JSON Parsing Logic for Socratic Mode ---
+                const socraticStore = useSocraticStore.getState(); // Get current state
+                let userFacingText = finalTranscript; // Default to the full transcript
+                let successfullyParsedSocraticJson = false;
+        
+                if (socraticStore.isSocraticModeActive) {
+                    try {
+                        // Attempt to parse the entire transcript as JSON
+                        const parsedJson: SocraticEvaluation = JSON.parse(finalTranscript);
+                        // Validate essential fields
+                        if (parsedJson.evaluation && parsedJson.follow_up_question && Array.isArray(parsedJson.matched_expectations) && Array.isArray(parsedJson.triggered_misconceptions)) {
+                            console.log("Parsed Socratic evaluation JSON:", parsedJson);
+                            socraticStore.setCurrentTurnEvaluation(parsedJson); // Store the whole evaluation object
+        
+                            // Update accumulated lists
+                            parsedJson.matched_expectations.forEach(socraticStore.addCoveredExpectation);
+                            parsedJson.triggered_misconceptions.forEach(socraticStore.addEncounteredMisconception);
+        
+                            // Extract the text to show/speak to the user
+                            userFacingText = parsedJson.follow_up_question;
+                             // Example combining: userFacingText = `${parsedJson.evaluation} ${parsedJson.follow_up_question}`;
+        
+                            successfullyParsedSocraticJson = true;
+                        } else {
+                             console.warn("Parsed JSON is missing expected Socratic keys, treating as plain text.", parsedJson);
+                             socraticStore.setCurrentTurnEvaluation(null); // Reset evaluation state if parse fails partially
+                        }
+                    } catch (e) {
+                        // JSON parsing failed, treat as plain text
+                        console.warn("Could not parse assistant response as Socratic JSON, treating as plain text.");
+                        // Ensure evaluation state is cleared if parsing fails
+                         socraticStore.setCurrentTurnEvaluation(null); 
+                    }
+                } else {
+                     // Not in Socratic mode, ensure evaluation state is clear
+                     socraticStore.setCurrentTurnEvaluation(null);
                 }
+                // --- Ende JSON Parsing Logic ---
+        
+                // Update or Add the final message item using userFacingText
+                const currentState = useConversationStore.getState();
+                const exists = currentState.chatMessages.some(m => m.id === itemId);
+                if (!exists) {
+                     addTranscriptItem({
+                         type: "message", role: "assistant", id: itemId,
+                         content: [{ type: 'output_text', text: userFacingText }] // Use extracted/final text
+                     } as MessageItem);
+                } else {
+                    updateTranscriptItem(itemId, userFacingText, false);
+                }
+        
+                 // Handle annotations (No change needed here)
+                 const annotations = (event as any).annotations || (event as any).content_part?.annotations;
+                 if (annotations && Array.isArray(annotations) && annotations.length > 0) {
+                      console.log(`Handling ${annotations.length} annotations for item ${itemId}`);
+                      useConversationStore.setState((state) => ({ 
+                        chatMessages: state.chatMessages.map(msg => {
+                            if (msg.id === itemId && msg.type === 'message' && msg.content?.[0]?.type === 'output_text') {
+                                const existingAnnotations = msg.content[0].annotations || [];
+                                // Basic duplicate check based on index and type (adjust if needed)
+                                const uniqueNewAnnotations = annotations.filter((newAnn: any) => 
+                                    !existingAnnotations.some((exAnn: any) => 
+                                        exAnn.index === newAnn.index && exAnn.type === newAnn.type
+                                        // Add more properties for stricter uniqueness check if required
+                                    )
+                                );
+                                if (uniqueNewAnnotations.length > 0) {
+                                    const updatedContent = { ...msg.content[0], annotations: [...existingAnnotations, ...uniqueNewAnnotations] };
+                                    return { ...msg, content: [updatedContent] };
+                                }
+                            }
+                            return msg;
+                        })
+                    }));
+                 }
+        
                 break;
             }
 
