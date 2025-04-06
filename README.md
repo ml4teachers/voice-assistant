@@ -30,11 +30,6 @@ The project is built using Next.js, TypeScript, Zustand for state management, an
 * Configurable Tools Panel (File Search setup, Web Search config, Function overview) using shadcn/ui components.
 * **Socratic Tutoring Mode:** Assistant can engage in Socratic dialogues (**Assessment** or **Tutoring** modes) on a user-specified topic, dynamically generating instructions based on context retrieved from the linked Vector Store.
 
-## Planned Features
-
-* Enhanced UI/UX refinement.
-* More sophisticated Socratic dialogue strategies (e.g., explicit misconception handling, learner modeling based on Hu et al.).
-* Scoring and feedback mechanisms for Assessment mode.
 
 ## Tech Stack
 

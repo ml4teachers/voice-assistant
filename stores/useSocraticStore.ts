@@ -3,14 +3,15 @@ import { persist } from "zustand/middleware"; // Optional: Use persist if state 
 
 type SocraticMode = 'Assessment' | 'Tutoring'; // Add other modes later if needed
 
-// Interface for the parsed JSON evaluation from the LLM
+// REMOVED: SocraticEvaluation Interface (no longer needed)
+/*
 export interface SocraticEvaluation {
     evaluation: string;
     matched_expectations: string[];
     triggered_misconceptions: string[];
     follow_up_question: string;
-    // Add other potential fields if the LLM provides them
 }
+*/
 
 interface SocraticState {
   isSocraticModeActive: boolean;
@@ -37,18 +38,19 @@ interface SocraticState {
   socraticDialogueState: string;
   setSocraticDialogueState: (state: string) => void;
 
-  // --- NEU: EMT/LCC Light State ---
-  sessionExpectations: string[]; // Parsed from generated prompt
+  // REMOVED: EMT/LCC Light State
+  /*
+  sessionExpectations: string[]; 
   setSessionExpectations: (expectations: string[]) => void;
-  sessionMisconceptions: string[]; // Parsed from generated prompt
+  sessionMisconceptions: string[];
   setSessionMisconceptions: (misconceptions: string[]) => void;
-  currentTurnEvaluation: SocraticEvaluation | null; // Last evaluation JSON from LLM
+  currentTurnEvaluation: SocraticEvaluation | null;
   setCurrentTurnEvaluation: (evaluation: SocraticEvaluation | null) => void;
-  coveredExpectations: string[]; // Accumulates matched expectations over session
+  coveredExpectations: string[]; 
   addCoveredExpectation: (expectation: string) => void;
-  encounteredMisconceptions: string[]; // Accumulates triggered misconceptions over session
+  encounteredMisconceptions: string[];
   addEncounteredMisconception: (misconception: string) => void;
-  // --- Ende Neu ---
+  */
 }
 
 const useSocraticStore = create<SocraticState>()(
@@ -58,8 +60,10 @@ const useSocraticStore = create<SocraticState>()(
       setIsSocraticModeActive: (isActive) => {
         console.log(`[SocraticStore] setIsSocraticModeActive called with: ${isActive}`);
         set((state) => {
-          const shouldReset = state.isSocraticModeActive !== isActive;
-          if (!isActive && shouldReset) {
+          const shouldChange = state.isSocraticModeActive !== isActive;
+          if (!shouldChange) return state; // No change needed
+
+          if (!isActive) { // Deactivating
             console.log("[SocraticStore] Deactivating Socratic mode, resetting related state.");
             return {
               isSocraticModeActive: false,
@@ -70,34 +74,30 @@ const useSocraticStore = create<SocraticState>()(
               socraticOpenerQuestion: null,
               isGeneratingPrompt: false,
               socraticDialogueState: 'idle',
-              // Reset new EMT states
+              // REMOVED: Resetting EMT state
+              /*
               sessionExpectations: [],
               sessionMisconceptions: [],
               currentTurnEvaluation: null,
               coveredExpectations: [],
               encounteredMisconceptions: [],
+              */
             };
-          } else if (isActive && shouldReset) {
-             console.log("[SocraticStore] Activating Socratic mode.");
+          } else { // Activating
+             console.log("[SocraticStore] Activating Socratic mode (keeping existing topic/mode if set).");
              return { 
-                 isSocraticModeActive: true, 
-                 // Reset previous session data but keep mode active
-                 currentSocraticTopic: null,
-                 selectedSocraticMode: null,
-                 retrievedSocraticContext: null,
-                 generatedSocraticPrompt: null,
-                 socraticOpenerQuestion: null,
-                 isGeneratingPrompt: false,
-                 socraticDialogueState: 'idle',
-                 sessionExpectations: [],
-                 sessionMisconceptions: [],
-                 currentTurnEvaluation: null,
-                 coveredExpectations: [],
-                 encounteredMisconceptions: [],
+                 isSocraticModeActive: true,
+                 // Keep existing core values
+                 currentSocraticTopic: state.currentSocraticTopic, 
+                 selectedSocraticMode: state.selectedSocraticMode,
+                 retrievedSocraticContext: state.retrievedSocraticContext,
+                 generatedSocraticPrompt: state.generatedSocraticPrompt,
+                 socraticOpenerQuestion: state.socraticOpenerQuestion,
+                 isGeneratingPrompt: state.isGeneratingPrompt, 
+                 socraticDialogueState: state.socraticDialogueState, 
+                 // REMOVED: Keeping EMT state (no longer exists)
              }; 
           }
-          // No change if isActive is the same as state.isSocraticModeActive
-          return state;
         });
       },
 
@@ -105,21 +105,15 @@ const useSocraticStore = create<SocraticState>()(
       setCurrentSocraticTopic: (topic) => {
         console.log(`[SocraticStore] setCurrentSocraticTopic called with: ${topic}`);
         set((state) => {
-          // Only update if topic actually changes
           if (state.currentSocraticTopic !== topic) {
-            console.log("[SocraticStore] Topic changed, resetting context, prompt, opener, evaluation, and state.");
+            console.log("[SocraticStore] Topic changed, resetting context, prompt, opener, and state.");
             return {
               currentSocraticTopic: topic,
               retrievedSocraticContext: null,
               generatedSocraticPrompt: null,
               socraticOpenerQuestion: null,
-              socraticDialogueState: topic ? 'generating_prompt' : 'idle', // Start generating prompt immediately if topic set
-              // Reset EMT state on topic change
-              sessionExpectations: [], 
-              sessionMisconceptions: [],
-              currentTurnEvaluation: null,
-              coveredExpectations: [], 
-              encounteredMisconceptions: [],
+              socraticDialogueState: topic ? 'generating_prompt' : 'idle', // Keep this logic
+              // REMOVED: Reset EMT state
             };
           } 
           return state; // No change if topic is the same
@@ -162,45 +156,21 @@ const useSocraticStore = create<SocraticState>()(
         set({ socraticDialogueState: state });
       },
 
-      // --- NEU: Initialisierung und Setter für EMT/LCC Light ---
+      // REMOVED: Initialization and Setters for EMT/LCC Light
+      /*
       sessionExpectations: [],
-      setSessionExpectations: (expectations) => {
-        console.log(`[SocraticStore] setSessionExpectations called with:`, expectations);
-        set({ sessionExpectations: expectations });
-      },
+      setSessionExpectations: (expectations) => { ... },
       sessionMisconceptions: [],
-      setSessionMisconceptions: (misconceptions) => {
-        console.log(`[SocraticStore] setSessionMisconceptions called with:`, misconceptions);
-        set({ sessionMisconceptions: misconceptions });
-      },
+      setSessionMisconceptions: (misconceptions) => { ... },
       currentTurnEvaluation: null,
-      setCurrentTurnEvaluation: (evaluation) => {
-        console.log(`[SocraticStore] setCurrentTurnEvaluation called with:`, evaluation);
-        set({ currentTurnEvaluation: evaluation });
-      },
+      setCurrentTurnEvaluation: (evaluation) => { ... },
       coveredExpectations: [],
-      addCoveredExpectation: (expectation) => {
-        console.log(`[SocraticStore] addCoveredExpectation called with: ${expectation}`);
-        set((state) => ({
-          coveredExpectations: state.coveredExpectations.includes(expectation) 
-            ? state.coveredExpectations 
-            : [...state.coveredExpectations, expectation]
-        }));
-      },
+      addCoveredExpectation: (expectation) => { ... },
       encounteredMisconceptions: [],
-      addEncounteredMisconception: (misconception) => {
-        console.log(`[SocraticStore] addEncounteredMisconception called with: ${misconception}`);
-        set((state) => ({
-          encounteredMisconceptions: state.encounteredMisconceptions.includes(misconception) 
-            ? state.encounteredMisconceptions 
-            : [...state.encounteredMisconceptions, misconception]
-        }));
-      },
-      // --- Ende Neu ---
+      addEncounteredMisconception: (misconception) => { ... },
+      */
     }),
-    /* {
-      name: "socratic-store", // Name for local storage persistence
-    } */
+    /* { name: "socratic-store" } */
   // ) // Uncomment if persistence is desired
 );
 

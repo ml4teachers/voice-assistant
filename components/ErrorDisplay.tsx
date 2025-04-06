@@ -16,4 +16,4 @@ const ErrorDisplay: React.FC<ErrorDisplayProps> = ({ lastError }) => {
     );
 };
 
-export default ErrorDisplay; 
+export default ErrorDisplay;

@@ -5,7 +5,7 @@ import useConversationStore from "@/stores/useConversationStore";
 // If not, define a placeholder type here.
 import { Annotation } from "@/components/annotations";
 import useToolsStore from "@/stores/useToolsStore";
-import useSocraticStore, { SocraticEvaluation } from "@/stores/useSocraticStore"; // Import the new Socratic store
+import useSocraticStore /*, { SocraticEvaluation } */ from "@/stores/useSocraticStore"; 
 // Remove getSocraticPromptForTopic as prompt generation is now fully backend driven
 // import { getSocraticPromptForTopic } from '@/config/socratic-prompt';
 
@@ -108,7 +108,8 @@ const updateToolCallItem = (itemId: string, updates: Partial<FunctionCallItem | 
 
 export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
-    // Get Socratic state (values will update automatically thanks to Zustand)
+    // REMOVED: Socratic state selectors no longer needed here for event handling logic
+    /*
     const {
         isSocraticModeActive,
         currentSocraticTopic,
@@ -116,11 +117,12 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
         socraticDialogueState,
         setRetrievedSocraticContext,
         setSocraticDialogueState,
-        setCurrentSocraticTopic, // Add setter for topic if needed here
+        setCurrentSocraticTopic,
         setCurrentTurnEvaluation,
         addCoveredExpectation,
         addEncounteredMisconception
     } = useSocraticStore.getState();
+    */
 
     const executeToolFunction = useCallback(async (toolCall: ToolCall) => {
         const toolCallUiId = toolCall.item_id || `tool-${toolCall.call_id || Date.now()}`;
@@ -311,7 +313,8 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
 
     }, [sendEvent]);
 
-    // --- Effect to Trigger Context Retrieval --- 
+    // REMOVED: useEffect to trigger context retrieval (handle this differently if needed)
+    /*
     useEffect(() => {
         if (isSocraticModeActive && currentSocraticTopic && !retrievedSocraticContext && socraticDialogueState === 'retrieving_context') {
             console.log(`Socratic Mode: Retrieving context for topic "${currentSocraticTopic}"`);
@@ -332,19 +335,15 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
         socraticDialogueState,
         executeToolFunction // executeToolFunction is stable due to useCallback
     ]);
+    */
 
     const handleServerEvent = useCallback((event: RealtimeEvent) => {
         // console.log("Handling Server Event:", event.type, event); // Verbose logging
         switch (event.type) {
              case "session.created":
-                console.log("Realtime session created event received:", event); // Log full event
-                console.log("Inspecting event.session object:", event.session); // Log session object structure
-                // const sessionId = event.session?.session_id; // session object appears empty
-                // console.log("Realtime session created ID:", sessionId); // Check if ID is found now
-                addTranscriptItem({
-                    type: "message", role: "system", id: `session-start-${Date.now()}`,
-                    content: [{ type: 'output_text', text: `Session Started` }] // Remove ID display
-                } as MessageItem);
+                console.log("Realtime session created event received:", event);
+                console.log("Inspecting event.session object:", event.session);
+                // "Session Started" message already removed
                 break;
 
              case "session.ended":
@@ -401,8 +400,8 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                     const socraticState = useSocraticStore.getState();
                     if (socraticState.isSocraticModeActive && !socraticState.currentSocraticTopic && socraticState.socraticDialogueState === 'idle') {
                          console.log("Socratic Mode: Setting topic from completed transcript:", finalTranscript);
-                         setCurrentSocraticTopic(finalTranscript);
-                         setSocraticDialogueState('retrieving_context');
+                         // setCurrentSocraticTopic(finalTranscript);
+                         // setSocraticDialogueState('retrieving_context');
                     }
                     // -------------------------------------------------------------
                 }
@@ -425,59 +424,21 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
             case "response.audio_transcript.done": {
                 const itemId = event.item_id;
                 const finalTranscript = event.transcript ?? "";
-                console.log(`Assistant transcript done (ID: ${itemId}):`, finalTranscript);
+                console.log(`Assistant transcript done (ID: ${itemId}): ${finalTranscript.substring(0,100)}...`);
         
                 if (!itemId) break;
         
-                // --- NEU: JSON Parsing Logic for Socratic Mode ---
-                const socraticStore = useSocraticStore.getState(); // Get current state
-                let userFacingText = finalTranscript; // Default to the full transcript
-                let successfullyParsedSocraticJson = false;
-        
-                if (socraticStore.isSocraticModeActive) {
-                    try {
-                        // Attempt to parse the entire transcript as JSON
-                        const parsedJson: SocraticEvaluation = JSON.parse(finalTranscript);
-                        // Validate essential fields
-                        if (parsedJson.evaluation && parsedJson.follow_up_question && Array.isArray(parsedJson.matched_expectations) && Array.isArray(parsedJson.triggered_misconceptions)) {
-                            console.log("Parsed Socratic evaluation JSON:", parsedJson);
-                            socraticStore.setCurrentTurnEvaluation(parsedJson); // Store the whole evaluation object
-        
-                            // Update accumulated lists
-                            parsedJson.matched_expectations.forEach(socraticStore.addCoveredExpectation);
-                            parsedJson.triggered_misconceptions.forEach(socraticStore.addEncounteredMisconception);
-        
-                            // Extract the text to show/speak to the user
-                            userFacingText = parsedJson.follow_up_question;
-                             // Example combining: userFacingText = `${parsedJson.evaluation} ${parsedJson.follow_up_question}`;
-        
-                            successfullyParsedSocraticJson = true;
-                        } else {
-                             console.warn("Parsed JSON is missing expected Socratic keys, treating as plain text.", parsedJson);
-                             socraticStore.setCurrentTurnEvaluation(null); // Reset evaluation state if parse fails partially
-                        }
-                    } catch (e) {
-                        // JSON parsing failed, treat as plain text
-                        console.warn("Could not parse assistant response as Socratic JSON, treating as plain text.");
-                        // Ensure evaluation state is cleared if parsing fails
-                         socraticStore.setCurrentTurnEvaluation(null); 
-                    }
-                } else {
-                     // Not in Socratic mode, ensure evaluation state is clear
-                     socraticStore.setCurrentTurnEvaluation(null);
-                }
-                // --- Ende JSON Parsing Logic ---
-        
-                // Update or Add the final message item using userFacingText
+                // Update or Add the final message item using the raw transcript for now.
+                // The function call handler below will potentially replace this with just the question.
                 const currentState = useConversationStore.getState();
                 const exists = currentState.chatMessages.some(m => m.id === itemId);
                 if (!exists) {
                      addTranscriptItem({
                          type: "message", role: "assistant", id: itemId,
-                         content: [{ type: 'output_text', text: userFacingText }] // Use extracted/final text
+                         content: [{ type: 'output_text', text: finalTranscript }]
                      } as MessageItem);
                 } else {
-                    updateTranscriptItem(itemId, userFacingText, false);
+                    updateTranscriptItem(itemId, finalTranscript, false);
                 }
         
                  // Handle annotations (No change needed here)
@@ -523,52 +484,68 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                 console.log("Full response done event received:", event.response);
                 if (event.response?.output) {
                     event.response.output.forEach((outputItem: any) => {
-                        // --- Trigger standard function calls --- 
-                        if (outputItem.type === "function_call" && outputItem.name && outputItem.arguments) {
-                            // Check if this is NOT the internal socratic context fetch
-                            if (!outputItem.call_id?.startsWith('socratic-ctx-')) {
+                        // --- Handle Standard Function Calls --- 
+                        if (outputItem.type === "function_call") { // Simplified: Handle ANY function call this way now
+                            // REMOVED: Specific check for submit_socratic_evaluation
+                            // if (outputItem.name !== "submit_socratic_evaluation") {
                                 try {
                                     const parsedArgs = JSON.parse(outputItem.arguments);
-                                    // Construct ToolCall object for execution
                                     const toolCallData: ToolCall = {
                                         type: "function_call",
                                         name: outputItem.name,
-                                        arguments: parsedArgs, // Pass parsed arguments
-                                        call_id: outputItem.call_id, // Essential for sending result back
-                                        // Attempt to associate with a response item ID if available
+                                        arguments: parsedArgs,
+                                        call_id: outputItem.call_id,
                                         item_id: outputItem.item_id || event.response?.id || `tool-${outputItem.call_id || Date.now()}`
                                     };
-                                    console.log(`[response.done] Triggering executeToolFunction for: ${toolCallData.name}`);
+                                    console.log(`[response.done] Triggering standard executeToolFunction for: ${toolCallData.name}`);
                                     executeToolFunction(toolCallData);
                                 } catch (parseError) {
-                                    console.error("[response.done] Failed to parse function call arguments:", parseError, outputItem.arguments);
-                                    // Add error message to UI?
-                                    addTranscriptItem({
-                                        type: "message", role: "system", id: `error-parse-${Date.now()}`,
-                                        content: [{ type: 'output_text', text: `Error parsing tool arguments for ${outputItem.name}` }]
-                                    } as MessageItem);
+                                    console.error(`[response.done] Failed to parse args for ${outputItem.name}:`, parseError, outputItem.arguments);
                                 }
-                            } else {
-                                console.log("[response.done] Skipping internal Socratic context fetch trigger.");
-                            }
+                            // }
                         }
-                        // --- Handle API File Search Call Output (If API does search directly) ---
+                        // REMOVED: Handler for submit_socratic_evaluation
+                        /*
+                        else if (outputItem.type === "function_call" && outputItem.name === "submit_socratic_evaluation") {
+                            // ... removed logic to update EMT state and transcript ...
+                        }
+                        */
+                        // --- Handle API File Search Call Output (Existing) --- 
                         else if (outputItem.type === "file_search_call") {
-                            console.log("API File search call output received in response.done:", outputItem);
-                            // Add UI update for API-driven file search if needed.
-                             addTranscriptItem({ // Example UI update
-                                 type: "tool_call",
-                                 tool_type: "file_search_call", 
-                                 id: outputItem.id || `fsc-api-${Date.now()}`,
-                                 status: outputItem.status || "completed",
-                                 queries: outputItem.queries,
-                                 search_results: outputItem.search_results,
-                                 call_id: outputItem.id,
-                             } as FileSearchCallItem);
+                             console.log("API File search call output received in response.done:", outputItem);
+                              addTranscriptItem({
+                                  type: "tool_call",
+                                  tool_type: "file_search_call", 
+                                  id: outputItem.id || `fsc-api-${Date.now()}`,
+                                  status: outputItem.status || "completed",
+                                  queries: outputItem.queries,
+                                  search_results: outputItem.search_results,
+                                  call_id: outputItem.id,
+                              } as FileSearchCallItem);
                         }
                         // --- Handle other output types if necessary --- 
                         // else if (outputItem.type === "message" && ...) { ... }
                     });
+                }
+                break;
+            }
+
+            // --- Handle Pure Text Streaming --- 
+            case "response.text.delta": {
+                const itemId = event.item_id;
+                const delta = event.delta ?? "";
+                console.log(`Handling text.delta for item ${itemId}: "${delta}"`);
+                if (itemId) {
+                    // Ensure item exists (likely assistant message)
+                    const exists = useConversationStore.getState().chatMessages.some(m => m.id === itemId);
+                    if (!exists) {
+                        addTranscriptItem({ 
+                            type: "message", role: "assistant", id: itemId, 
+                            content: [{ type: 'output_text', text: '' }] 
+                        } as MessageItem);
+                    }
+                    // Append delta
+                    updateTranscriptItem(itemId, delta, true);
                 }
                 break;
             }
@@ -684,7 +661,7 @@ export function useHandleRealtimeEvents(sendEvent: (event: any) => void) {
                  console.warn('Unhandled server event type:', unhandledEvent?.type, unhandledEvent);
                 break;
         }
-    }, [executeToolFunction, sendEvent, setCurrentSocraticTopic, setSocraticDialogueState]); // Include Socratic setters
+    }, [executeToolFunction, sendEvent]); // REMOVED: Socratic setters from dependencies
 
     // Use a ref to ensure the callback passed to the effect always has the latest scope
     const handleServerEventRef = useRef(handleServerEvent);

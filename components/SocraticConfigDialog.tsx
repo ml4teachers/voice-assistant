@@ -25,7 +25,12 @@ import { Loader2 } from 'lucide-react'; // For loading spinner
 
 type SocraticMode = 'Assessment' | 'Tutoring';
 
-export function SocraticConfigDialog() {
+// Define props for the component
+interface SocraticConfigDialogProps {
+  onClose: () => void; // Function to close the dialog from parent
+}
+
+export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { // Destructure onClose from props
     const { vectorStore } = useToolsStore();
     const {
         setIsSocraticModeActive,
@@ -35,8 +40,6 @@ export function SocraticConfigDialog() {
         setSocraticOpenerQuestion,
         isGeneratingPrompt,
         setIsGeneratingPrompt,
-        setSessionExpectations,
-        setSessionMisconceptions,
     } = useSocraticStore();
 
     const [topic, setTopic] = useState('');
@@ -54,8 +57,6 @@ export function SocraticConfigDialog() {
         setProgressValue(10); // Initial progress
         setGeneratedSocraticPrompt(null);
         setSocraticOpenerQuestion(null);
-        setSessionExpectations([]);
-        setSessionMisconceptions([]);
 
         try {
             // Simulate progress increase
@@ -81,51 +82,18 @@ export function SocraticConfigDialog() {
             const data = await response.json();
             if (data.socraticPrompt && data.openerQuestion) {
                  console.log("Successfully generated Socratic prompt and opener.");
-                setGeneratedSocraticPrompt(data.socraticPrompt);
-                setSocraticOpenerQuestion(data.openerQuestion);
                 setCurrentSocraticTopic(topic);
                 setSelectedSocraticMode(mode as SocraticMode);
+                setGeneratedSocraticPrompt(data.socraticPrompt);
+                setSocraticOpenerQuestion(data.openerQuestion);
                 setIsSocraticModeActive(true);
                 setProgressValue(100); // Set to complete
 
-                // --- NEU: Parse E/M from prompt ---
-                try {
-                    const promptText = data.socraticPrompt as string;
-                    const expectationsMatch = promptText.match(/<EXPECTATIONS>([\s\S]*?)<\/EXPECTATIONS>/);
-                    const misconceptionsMatch = promptText.match(/<MISCONCEPTIONS>([\s\S]*?)<\/MISCONCEPTIONS>/);
-
-                    const parseList = (match: RegExpMatchArray | null): string[] => {
-                        if (!match || !match[1]) return [];
-                        return match[1]
-                            .split('\n') // Split by newline
-                            .map(line => line.trim()) // Trim whitespace
-                            .map(line => line.startsWith('- ') ? line.substring(2).trim() : line.trim()) // Remove leading "- "
-                            .filter(line => line.length > 0); // Remove empty lines
-                    };
-
-                    const expectations = parseList(expectationsMatch);
-                    const misconceptions = parseList(misconceptionsMatch);
-
-                    console.log("Parsed Expectations:", expectations);
-                    console.log("Parsed Misconceptions:", misconceptions);
-                    setSessionExpectations(expectations);
-                    setSessionMisconceptions(misconceptions);
-
-                } catch (parseError) {
-                     console.error("Could not parse Expectations/Misconceptions from generated prompt:", parseError);
-                     // Set empty arrays or handle error
-                     setSessionExpectations([]);
-                     setSessionMisconceptions([]);
-                }
-                // --- Ende Parsing ---
-
-                 // Close dialog after a short delay (optional)
+                // Call the passed onClose function after delay
                  setTimeout(() => {
-                      // Find a way to close the dialog, might need to pass 'setOpen' from parent
-                      // Or use DialogClose Trigger
-                      document.getElementById('socratic-dialog-close-button')?.click(); // Hacky way if needed
-                      setIsGeneratingPrompt(false); // Reset loading state
-                      setProgressValue(0); // Reset progress
+                    onClose(); // Use the passed function
+                    setIsGeneratingPrompt(false);
+                    setProgressValue(0);
                  }, 500);
 
             } else {
@@ -141,8 +109,6 @@ export function SocraticConfigDialog() {
             setSocraticOpenerQuestion(null);
             setCurrentSocraticTopic(null);
             setSelectedSocraticMode(null);
-            setSessionExpectations([]);
-            setSessionMisconceptions([]);
         }
     };
 
@@ -221,13 +187,9 @@ export function SocraticConfigDialog() {
              )}
 
             <DialogFooter>
-                 <DialogClose asChild>
-                      <button id="socratic-dialog-close-button" style={{ display: 'none' }}>Close</button>
-                 </DialogClose>
                  <Button
                      type="button"
                      onClick={handleGenerate}
-                     // Disable button also when loading
                      disabled={isGeneratingPrompt || !mode || !topic || !vectorStore?.id}
                  >
                      {isGeneratingPrompt ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Prepare Socratic Session'}

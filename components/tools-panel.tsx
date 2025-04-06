@@ -1,5 +1,5 @@
 "use client";
-import React from "react";
+import React, { useEffect, useState } from "react";
 import FileSearchSetup from "./file-search-setup";
 import WebSearchConfig from "./websearch-config";
 import FunctionsView from "./functions-view";
@@ -30,6 +30,18 @@ export default function ToolsPanel() {
   const setIsSocraticModeActive = useSocraticStore((state) => state.setIsSocraticModeActive);
   // ---------------------------------------------------
 
+  // --- State to control the Socratic Config Dialog --- 
+  const [isConfigDialogOpen, setIsConfigDialogOpen] = useState(false);
+  // ---------------------------------------------------
+
+  // --- Log Socratic state when active and changing --- 
+  useEffect(() => {
+    if (isSocraticModeActive) {
+      console.log("[ToolsPanel - Active Mode Update] Topic:", currentSocraticTopic, "Mode:", selectedSocraticMode);
+    }
+  }, [isSocraticModeActive, currentSocraticTopic, selectedSocraticMode]);
+  // ----------------------------------------------------
+
   return (
     <div className="flex flex-col h-full">
 
@@ -50,9 +62,9 @@ export default function ToolsPanel() {
                     </Button>
                </div>
            ) : (
-              <Dialog>
+              <Dialog open={isConfigDialogOpen} onOpenChange={setIsConfigDialogOpen}>
                   <DialogTrigger asChild>
-                      <Button variant="outline" className="w-full justify-start">
+                      <Button variant="outline" className="w-full justify-start" onClick={() => setIsConfigDialogOpen(true)}>
                            <BrainCircuit className="mr-2 h-4 w-4" /> Configure Socratic Tutor
                       </Button>
                   </DialogTrigger>
@@ -63,7 +75,7 @@ export default function ToolsPanel() {
                       <DialogDescription id="socratic-config-description" className="sr-only">
                         Configure Socratic tutor mode, topic, and knowledge base.
                       </DialogDescription>
-                      <SocraticConfigDialog />
+                      <SocraticConfigDialog onClose={() => setIsConfigDialogOpen(false)} />
                   </DialogContent>
               </Dialog>
            )}

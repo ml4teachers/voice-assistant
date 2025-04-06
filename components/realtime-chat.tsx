@@ -24,15 +24,47 @@ import { MicIcon, MessageSquareQuoteIcon } from "lucide-react"; // Import MicIco
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
 type PermissionStatus = "prompt" | "granted" | "denied";
 
+// Define the schema for our evaluation tool
+/*
+const socraticEvaluationToolSchema = {
+    type: "function" as const,
+    name: "submit_socratic_evaluation",
+    description: "Submits the tutor's evaluation of the user's response and the next question.",
+    parameters: {
+        type: "object" as const,
+        properties: {
+            evaluation: {
+                type: "string" as const,
+                description: "Brief, encouraging evaluation of the user's input based on context, expectations, and misconceptions."
+            },
+            matched_expectations: {
+                type: "array" as const,
+                items: { type: "string" as const },
+                description: "List of specific EXPECTATION strings (from the prompt) that the user's response correctly addressed."
+            },
+            triggered_misconceptions: {
+                type: "array" as const,
+                items: { type: "string" as const },
+                description: "List of specific MISCONCEPTION strings (from the prompt) that the user's response seemed to indicate."
+            },
+            follow_up_question: {
+                type: "string" as const,
+                description: "The next Socratic question to ask the user."
+            }
+        },
+        required: ["evaluation", "matched_expectations", "triggered_misconceptions", "follow_up_question"],
+        additionalProperties: false
+    },
+};
+*/
+
 export default function RealtimeChat() {
     const { chatMessages, rawSet: rawSetConversation } = useConversationStore(); // Get messages and rawSet from Zustand
-    // --- Individual selectors for Socratic state ---
-    const isSocraticModeActive = useSocraticStore((state) => state.isSocraticModeActive);
+    // --- Selectors for Socratic state (primarily for UI now) ---
+    const isSocraticModeActiveUI = useSocraticStore((state) => state.isSocraticModeActive);
     const socraticOpenerQuestion = useSocraticStore((state) => state.socraticOpenerQuestion);
-    // Add selectors for the new UI display
     const selectedSocraticMode = useSocraticStore((state) => state.selectedSocraticMode);
     const currentSocraticTopic = useSocraticStore((state) => state.currentSocraticTopic);
-    const currentTurnEvaluation = useSocraticStore((state) => state.currentTurnEvaluation);
     // -------------------------------------------
     const [sessionStatus, setSessionStatus] = useState<SessionStatus>("DISCONNECTED");
     const pcRef = useRef<RTCPeerConnection | null>(null);
@@ -44,6 +76,7 @@ export default function RealtimeChat() {
     const chatContainerRef = useRef<HTMLDivElement>(null); // Ref for scrolling
     const [micPermission, setMicPermission] = useState<PermissionStatus>("prompt");
     const localStreamRef = useRef<MediaStream | null>(null); // Ref to store the stream
+    const baseTools = getTools(); // Fetch base tools once per render
 
     // Function to send events *to* the DataChannel
     const sendEvent = useCallback((event: any) => {
@@ -192,13 +225,12 @@ export default function RealtimeChat() {
         }
 
         // 4. Proceed with Connection Setup
-        console.log("Attempting to start Realtime session (mic granted, stream available)...");
+        console.log("Attempting to start Realtime session (mic granted, stream available)... v5 - No Socratic Tool");
         setIsAssistantSpeaking(false);
         setLastError(null);
         setSessionStatus('CONNECTING');
-        // Clear conversation BUT keep the opener question visible if applicable
-        rawSetConversation({ chatMessages: [] }); 
-
+        rawSetConversation({ chatMessages: [] });
+        
         if (!remoteAudioElement.current) {
             console.log("Creating audio element for playback.");
             remoteAudioElement.current = new Audio();
@@ -207,11 +239,9 @@ export default function RealtimeChat() {
             remoteAudioElement.current.setAttribute('playsinline', 'true');
         }
 
-        const toolsForBackend = getTools();
-
         const connection = await createRealtimeConnection(
             remoteAudioElement,
-            toolsForBackend,
+            baseTools, // Pass base tools initially
             currentStream 
         );
 
@@ -236,22 +266,32 @@ export default function RealtimeChat() {
             }
         };
 
+        // --- onopen callback --- 
         dcRef.current.onopen = () => {
-            console.log("DataChannel opened, sending session.update");
+            console.log("DataChannel opened, determining final session config via getState() and sending update...");
             setSessionStatus('CONNECTED');
             setLastError(null);
 
-            // Get the LATEST Socratic state (including the prompt with opener hint)
-            const latestSocraticState = useSocraticStore.getState();
-            let currentInstructions = DEVELOPER_PROMPT; // Default
+            let toolsForSession = [...baseTools]; // Use baseTools from closure
+            let toolChoice: any = "auto"; // Default: auto
+            let currentInstructions = DEVELOPER_PROMPT; // Default instructions
+            
+            const latestSocraticState = useSocraticStore.getState(); 
+            console.log("[RealtimeChat onopen] Full Socratic State from getState():", JSON.stringify(latestSocraticState));
 
-            if (latestSocraticState.isSocraticModeActive && latestSocraticState.generatedSocraticPrompt) {
-                 console.log("Socratic Mode is Active - Using generated prompt (read at onopen). Includes hint about opener.");
-                 currentInstructions = latestSocraticState.generatedSocraticPrompt;
-            } else if (latestSocraticState.isSocraticModeActive && !latestSocraticState.generatedSocraticPrompt) {
-                 console.warn("Socratic Mode active, but no prompt available at onopen. Using default prompt.");
+            if (latestSocraticState.isSocraticModeActive) {
+                console.log("[RealtimeChat onopen] Checking generatedSocraticPrompt:", latestSocraticState.generatedSocraticPrompt ? `Exists (length ${latestSocraticState.generatedSocraticPrompt.length})` : "MISSING or empty");
+
+                if (latestSocraticState.generatedSocraticPrompt) {
+                    console.log("Socratic Mode Active (onopen - getState): Using generated Socratic prompt.");
+                    currentInstructions = latestSocraticState.generatedSocraticPrompt; 
+                    // Ensure toolChoice remains auto for Socratic mode without function forcing
+                    toolChoice = "auto"; 
+                } else {
+                    console.warn("Socratic Mode active (onopen - getState), but generatedSocraticPrompt is missing. Using default prompt and tools.");
+                }
             } else {
-                 console.log("Socratic Mode is Inactive - Using developer prompt (read at onopen).");
+                console.log("Socratic Mode Inactive (onopen - getState): Using default prompt and tools.");
             }
 
             const initialSessionUpdate = {
@@ -261,19 +301,19 @@ export default function RealtimeChat() {
                     input_audio_format: "pcm16",
                     output_audio_format: "pcm16",
                     input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
-                    instructions: currentInstructions, // This now contains the hint about the opener
-                    voice: "shimmer", // Or another voice like "sage"
+                    voice: "echo",
                     turn_detection: {
                         type: "server_vad",
                         threshold: 0.5,
                         silence_duration_ms: 800,
                         create_response: true,
                     },
-                    tools: toolsForBackend,
-                    // vector_store_ids are handled via wrapper now
+                    instructions: currentInstructions, // Use potentially updated instructions
+                    tools: toolsForSession,           // Use base tools
+                    tool_choice: toolChoice,          // Should be 'auto'
                 },
             };
-            console.log("Sending final session.update payload (read at onopen):", JSON.stringify(initialSessionUpdate, null, 2));
+            console.log("Sending final session.update payload (Socratic Mode: ", latestSocraticState.isSocraticModeActive , "):", JSON.stringify(initialSessionUpdate, null, 2));
             sendEvent(initialSessionUpdate);
         };
 
@@ -317,14 +357,15 @@ export default function RealtimeChat() {
          };
 
     }, [
-        sessionStatus,
-        micPermission,
-        cleanupConnection,
-        sendEvent,
-        handleServerEventRef,
-        rawSetConversation,
-        requestMicrophoneAccess,
-        // No need to depend on socratic state here, it's read inside onopen
+        // Add baseTools to dependency array
+        baseTools,
+        micPermission, 
+        sessionStatus, 
+        cleanupConnection, 
+        sendEvent, 
+        handleServerEventRef, 
+        rawSetConversation, 
+        requestMicrophoneAccess, 
     ]);
 
     // Function to stop the session
@@ -392,32 +433,19 @@ export default function RealtimeChat() {
                 </div>
 
                 {/* --- NEU: Socratic Status Display --- */}
-                {isSocraticModeActive && (
+                {isSocraticModeActiveUI && (
                     <div className="flex-shrink-0 px-4 py-2 border-b border-border bg-accent/50 rounded-t-md text-xs text-muted-foreground">
                         <div className="flex justify-between items-center">
                             <div>
                                 <span className="font-medium text-foreground">Socratic Mode:</span> {selectedSocraticMode || 'N/A'} | <span className="font-medium text-foreground">Topic:</span> {currentSocraticTopic || 'N/A'}
                             </div>
-                            {/* Optional: Show last evaluation text briefly */}
-                            {currentTurnEvaluation?.evaluation && (
-                                <span className="italic ml-4 truncate max-w-[50%]" title={currentTurnEvaluation.evaluation}> {/* Added max-w */} 
-                                     Tutor Eval: "{currentTurnEvaluation.evaluation}"
-                                 </span>
-                            )}
                         </div>
-                         {/* Optional: Display covered expectations / triggered misconceptions */}
-                         {/*
-                         <div className="mt-1 flex gap-4">
-                             <p>Covered: {useSocraticStore.getState().coveredExpectations.length}</p>
-                             <p>Misconceptions: {useSocraticStore.getState().encounteredMisconceptions.length}</p>
-                         </div>
-                         */}
                     </div>
                 )}
                 {/* -------------------------------------- */}
 
                 {/* ---- Display Opener Question Conditionally ---- */} 
-                {sessionStatus === 'CONNECTED' && isSocraticModeActive && socraticOpenerQuestion && chatMessages.length === 0 && (
+                {sessionStatus === 'CONNECTED' && isSocraticModeActiveUI && socraticOpenerQuestion && chatMessages.length === 0 && (
                     <div className="flex-shrink-0 p-4 mb-2 border rounded-md bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-700">
                         <div className="flex items-start space-x-3">
                             <MessageSquareQuoteIcon className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
@@ -438,7 +466,7 @@ export default function RealtimeChat() {
                         "h-0 min-h-[150px]", // Adjusted min-height slightly
                         "overflow-y-auto p-4 space-y-4",
                          // Add rounded-b-md if Socratic status is shown, otherwise full rounded-md
-                         isSocraticModeActive ? 'rounded-b-md rounded-t-none' : 'rounded-md' 
+                         isSocraticModeActiveUI ? 'rounded-b-md rounded-t-none' : 'rounded-md' 
                     )}
                 >
                     {/* Display "Connecting..." inside if no messages yet and connecting */} 

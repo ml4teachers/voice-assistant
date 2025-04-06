@@ -69,6 +69,14 @@ export interface ResponseFunctionCallArgumentsDoneEvent extends RealtimeEventBas
     arguments: string;
 }
 
+export interface ResponseTextDeltaEvent extends RealtimeEventBase {
+    type: 'response.text.delta';
+    item_id: string | null;
+    delta: string | null;
+    output_index?: number;
+    response_id?: string;
+}
+
 export type RealtimeEvent =
     | SessionCreatedEvent 
     | SessionEndedEvent
@@ -93,6 +101,7 @@ export type RealtimeEvent =
     | OutputAudioBufferStoppedEvent
     | ToolCallEvent 
     | ErrorEvent
+    | ResponseTextDeltaEvent
     | ResponseFunctionCallArgumentsDeltaEvent
     | ResponseFunctionCallArgumentsDoneEvent;
 
