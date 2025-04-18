@@ -43,10 +43,11 @@ async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Rem
 }
 
 export async function createRealtimeConnection(
-    audioElement: RefObject<HTMLAudioElement | null>,
+    audioElement: RefObject<HTMLAudioElement | null>, // ADD BACK for diagnosis
     tools: Tool[],
     // Expect the MediaStream object as an argument
-    mediaStream: MediaStream 
+    mediaStream: MediaStream,
+    onRemoteTrack: (stream: MediaStream) => void // ADD this prop
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> {
     const ephemeralKey = await fetchEphemeralKey(tools);
     if (!ephemeralKey) {
@@ -61,13 +62,23 @@ export async function createRealtimeConnection(
         console.log("PeerConnection created.");
 
         pc.ontrack = (e) => {
-            if (audioElement.current && e.track.kind === 'audio') { // Ensure it's an audio track
-                console.log("Received remote audio track:", e.track.kind);
-                // Check if srcObject is already set to avoid unnecessary re-assignment
-                if (audioElement.current.srcObject !== e.streams[0]) {
-                    audioElement.current.srcObject = e.streams[0];
-                    audioElement.current.play().catch(err => console.error("Audio playback failed:", err));
-                }
+            console.log(`[connection.ts ontrack] Event received. Kind: ${e.track.kind}, Streams: ${e.streams.length}`);
+            if (e.track.kind === 'audio' && e.streams && e.streams[0]) {
+                console.log(`[connection.ts ontrack] Calling onRemoteTrack callback with stream ID: ${e.streams[0].id}`);
+                onRemoteTrack(e.streams[0]);
+                // --- REMOVE direct assignment to audioElement here ---
+                // The following code remains commented out / removed as intended
+                /*
+                // if (audioElement.current && e.track.kind === 'audio') {
+                //     if (audioElement.current.srcObject !== e.streams[0]) {
+                //         audioElement.current.srcObject = e.streams[0];
+                //         audioElement.current.play().catch(err => console.error("Audio playback failed:", err));
+                //     }
+                // }
+                */
+                // ---------------------------------------------------
+            } else {
+                 console.warn("[connection.ts ontrack] Received track event without valid audio stream.");
             }
         };
 

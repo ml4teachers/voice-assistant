@@ -29,9 +29,6 @@ interface SocraticState {
   generatedSocraticPrompt: string | null; // The final prompt for the Realtime API
   setGeneratedSocraticPrompt: (prompt: string | null) => void;
 
-  socraticOpenerQuestion: string | null; // The question shown to the user first
-  setSocraticOpenerQuestion: (question: string | null) => void;
-
   isGeneratingPrompt: boolean; // Loading state
   setIsGeneratingPrompt: (isLoading: boolean) => void;
 
@@ -71,7 +68,6 @@ const useSocraticStore = create<SocraticState>()(
               selectedSocraticMode: null,
               retrievedSocraticContext: null,
               generatedSocraticPrompt: null,
-              socraticOpenerQuestion: null,
               isGeneratingPrompt: false,
               socraticDialogueState: 'idle',
               // REMOVED: Resetting EMT state
@@ -92,7 +88,6 @@ const useSocraticStore = create<SocraticState>()(
                  selectedSocraticMode: state.selectedSocraticMode,
                  retrievedSocraticContext: state.retrievedSocraticContext,
                  generatedSocraticPrompt: state.generatedSocraticPrompt,
-                 socraticOpenerQuestion: state.socraticOpenerQuestion,
                  isGeneratingPrompt: state.isGeneratingPrompt, 
                  socraticDialogueState: state.socraticDialogueState, 
                  // REMOVED: Keeping EMT state (no longer exists)
@@ -111,7 +106,6 @@ const useSocraticStore = create<SocraticState>()(
               currentSocraticTopic: topic,
               retrievedSocraticContext: null,
               generatedSocraticPrompt: null,
-              socraticOpenerQuestion: null,
               socraticDialogueState: topic ? 'generating_prompt' : 'idle', // Keep this logic
               // REMOVED: Reset EMT state
             };
@@ -136,12 +130,6 @@ const useSocraticStore = create<SocraticState>()(
       setGeneratedSocraticPrompt: (prompt) => {
         console.log(`[SocraticStore] setGeneratedSocraticPrompt called (length: ${prompt?.length})`);
         set({ generatedSocraticPrompt: prompt });
-      },
-
-      socraticOpenerQuestion: null,
-      setSocraticOpenerQuestion: (question) => {
-        console.log(`[SocraticStore] setSocraticOpenerQuestion called with: ${question}`);
-        set({ socraticOpenerQuestion: question });
       },
 
       isGeneratingPrompt: false,

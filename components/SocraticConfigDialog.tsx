@@ -37,7 +37,6 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
         setCurrentSocraticTopic,
         setSelectedSocraticMode,
         setGeneratedSocraticPrompt,
-        setSocraticOpenerQuestion,
         isGeneratingPrompt,
         setIsGeneratingPrompt,
     } = useSocraticStore();
@@ -56,12 +55,11 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
         setIsGeneratingPrompt(true);
         setProgressValue(10); // Initial progress
         setGeneratedSocraticPrompt(null);
-        setSocraticOpenerQuestion(null);
 
         try {
             // Simulate progress increase
              const interval = setInterval(() => {
-                 setProgressValue((prev) => (prev < 90 ? prev + 5 : prev));
+                 setProgressValue((prev) => (prev < 90 ? prev + 1 : prev));
              }, 300);
 
              console.log(`Requesting Socratic prompt generation: Mode=${mode}, Topic=${topic}, VS=${vectorStore.id}`);
@@ -80,12 +78,11 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
             }
 
             const data = await response.json();
-            if (data.socraticPrompt && data.openerQuestion) {
-                 console.log("Successfully generated Socratic prompt and opener.");
+            if (data.socraticPrompt) {
+                 console.log("Successfully generated Socratic prompt.");
                 setCurrentSocraticTopic(topic);
                 setSelectedSocraticMode(mode as SocraticMode);
                 setGeneratedSocraticPrompt(data.socraticPrompt);
-                setSocraticOpenerQuestion(data.openerQuestion);
                 setIsSocraticModeActive(true);
                 setProgressValue(100); // Set to complete
 
@@ -97,7 +94,7 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
                  }, 500);
 
             } else {
-                throw new Error("Backend did not return a valid prompt or opener question.");
+                throw new Error("Backend did not return a valid prompt.");
             }
 
         } catch (err) {
@@ -106,7 +103,6 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
             setIsGeneratingPrompt(false);
              setProgressValue(0); // Reset progress on error
             setGeneratedSocraticPrompt(null);
-            setSocraticOpenerQuestion(null);
             setCurrentSocraticTopic(null);
             setSelectedSocraticMode(null);
         }
@@ -121,7 +117,7 @@ export function SocraticConfigDialog({ onClose }: SocraticConfigDialogProps) { /
             {/* Conditionally render Form or Loading State */}
             {isGeneratingPrompt ? (
                 // --- Loading State --- 
-                <div className="flex flex-col items-center justify-center gap-3 py-8 min-h-[250px]">
+                <div className="flex flex-col items-center justify-center gap-3 py-8">
                      <Progress value={progressValue} className="w-[80%] h-2" />
                      <p className="text-sm text-muted-foreground text-center mt-1.5">Generating Socratic instructions...</p>
                 </div>

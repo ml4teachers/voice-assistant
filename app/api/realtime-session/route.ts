@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 export async function POST(request: Request) {
   // Extract model, tools, and tool_resources from the request body
   const { 
-    model = "gpt-4o-mini-realtime-preview", 
+    model = "gpt-4o-realtime-preview", 
     tools = [], // Default to empty array if not provided
     tool_resources = null // Default to null if not provided
   } = await request.json().catch(() => ({}));
