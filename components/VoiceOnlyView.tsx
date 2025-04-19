@@ -188,25 +188,11 @@ export default function VoiceOnlyView({
     sessionStatus,
     lastError,
     isSocraticModeActiveUI,
-    // --- Destructure volumes instead of streams ---
-    // localStream,
-    // remoteStream,
     localFrequencyData,  // Use new props
     remoteFrequencyData, // Use new props
-    // -------------------------------------------
-    // isUserSpeaking = false, // Default user speaking state
-    // --- Destructure the Visualizer Component prop ---
-    // VisualizerComponent, // Remove prop
-    // ----------------------------------------------
+
 }: VoiceOnlyViewProps) {
 
-    // --- Remove Debug Log ---
-    // console.log("[VoiceOnlyView] Rendering with streams:", {
-    //     localStream: localStream ? `Stream ID: ${localStream.id}` : null,
-    //     remoteStream: remoteStream ? `Stream ID: ${remoteStream.id}` : null,
-    //     sessionStatus,
-    // });
-    // ------------------------
 
     return (
         <div className={cn(
@@ -215,7 +201,7 @@ export default function VoiceOnlyView({
              isSocraticModeActiveUI ? 'rounded-b-md rounded-t-none' : 'rounded-md'
         )}>
             {/* Assistant Visualizer */}
-            <div className="w-80 h-80 bg-card border rounded-full flex items-center justify-center px-8 shadow-md my-16"> {/* Increased size */}
+            <div className="w-80 h-80 bg-muted border rounded-full flex items-center justify-center px-8 shadow-md my-16"> {/* Increased size */}
                  <div className="w-full h-[80%]"> {/* Increased inner container height */} 
                       {/* --- Use FrequencyVisualizer --- */}
                       <FrequencyVisualizer

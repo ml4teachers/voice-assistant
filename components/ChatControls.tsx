@@ -1,106 +1,155 @@
 import React from 'react';
-import { Mic, MicOff, Trash2, MicIcon } from 'lucide-react';
 import { Button } from "@/components/ui/button";
+import { MicIcon, MicOffIcon, VideoIcon, VideoOffIcon, PhoneOffIcon, ScreenShareIcon, EraserIcon } from 'lucide-react';
+import { cn } from "@/lib/utils";
 
 // Define PermissionStatus type (can be moved to a central types file)
 type PermissionStatus = "prompt" | "granted" | "denied";
 
 interface ChatControlsProps {
-    isConnected: boolean;
-    isConnecting: boolean;
-    isSpeaking: boolean;
-    currentUtterance: string;
-    startSession: () => void;
+    shareScreenAndStartSession: () => void;
     stopSession: () => void;
     clearConversation: () => void;
     micPermission: PermissionStatus;
-    requestMicPermission: () => Promise<MediaStream | null>;
+    requestMicPermission: () => void;
+    cameraPermission: PermissionStatus; // <<< ADDED this prop
+    isCameraStreamActive: boolean;
+    requestCameraPermission: () => void;
+    isConnected: boolean;
+    isConnecting: boolean;
+    isSpeaking: boolean;
+    canStartSession: boolean;
 }
 
 const ChatControls: React.FC<ChatControlsProps> = ({
-    isConnected,
-    isConnecting,
-    isSpeaking,
-    currentUtterance,
-    startSession,
+    shareScreenAndStartSession,
     stopSession,
     clearConversation,
     micPermission,
-    requestMicPermission
+    requestMicPermission,
+    cameraPermission,
+    isCameraStreamActive,
+    requestCameraPermission,
+    isConnected,
+    isConnecting,
+    isSpeaking,
+    canStartSession,
 }) => {
-    const isStartDisabled = isConnecting || micPermission !== 'granted';
+    const getMicIcon = () => {
+        switch (micPermission) {
+            case 'granted': return <MicIcon className="h-5 w-5" />;
+            case 'denied': return <MicOffIcon className="h-5 w-5 text-destructive" />;
+            case 'prompt':
+            default: return <MicOffIcon className="h-5 w-5" />;
+        }
+    };
+
+    const getCameraIcon = () => {
+        return cameraPermission === 'granted' ? <VideoIcon className="h-5 w-5" /> : <VideoOffIcon className="h-5 w-5" />;
+    };
+
+    // Determine tooltip messages
+    const micTooltip = micPermission === 'granted' ? "Microphone Granted" : micPermission === 'denied' ? "Microphone Denied" : "Request Microphone Permission";
+    const cameraTooltip = cameraPermission === 'granted' ? "Camera Active" : "Activate Camera"; // Adjusted tooltip text
+    let startTooltip = "Share Screen & Start Session";
+    if (isConnected || isConnecting) {
+        startTooltip = isConnecting ? "Connecting..." : "Session active";
+    } else if (!canStartSession) {
+        startTooltip = "Grant microphone and camera permissions first";
+    }
+
+    // Determine if mic permission has been granted (used for disabling start button)
+    const isMicPermissionGranted = micPermission === 'granted';
 
     return (
-        <>
-            <div className="flex flex-col items-center gap-3">
-                <div className="flex justify-center items-center gap-4">
-                    {/* Show Permission Button if not granted */}
-                    {micPermission !== 'granted' && (
-                        <Button
-                            onClick={requestMicPermission}
-                            variant="secondary" // Or default?
-                            size="lg"
-                            className="px-6 py-3 rounded-full flex items-center justify-center shadow-lg"
-                            title={micPermission === 'denied' ? "Permission denied. Check settings." : "Grant microphone access"}
-                            disabled={micPermission === 'denied'}
-                        >
-                             <MicIcon className="mr-2 h-5 w-5" />
-                             {micPermission === 'denied' ? "Permission Denied" : "Allow Mic"}
-                        </Button>
-                    )}
+        <div className="flex items-center justify-center gap-3 p-3 bg-card rounded-lg flex-wrap">
+            {/* Mic Button */}
+            <Button
+                variant="outline"
+                size="icon"
+                onClick={requestMicPermission}
+                disabled={micPermission === 'denied' || (isMicPermissionGranted && (isConnected || isConnecting))}
+                title={micTooltip}
+                className={cn({
+                    "hover:bg-muted": micPermission === 'prompt' && !isConnected && !isConnecting,
+                    "cursor-not-allowed opacity-50": micPermission === 'denied' || (isMicPermissionGranted && (isConnected || isConnecting)),
+                    "border-green-500": isMicPermissionGranted,
+                    "border-red-500": micPermission === 'denied'
+                })}
+            >
+                {getMicIcon()}
+            </Button>
 
-                    {/* Start/Stop Button - Disabled based on connection AND permission */}
-                    <Button
-                        onClick={isConnected ? stopSession : startSession}
-                        disabled={isStartDisabled} // Use combined disabled state
-                        variant={isConnected ? "destructive" : "default"}
-                        size="lg"
-                        className="px-6 py-3 rounded-full flex items-center justify-center transition-all duration-200 ease-in-out shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        title={isConnecting ? "Connecting..." : isConnected ? "Stop session" : (micPermission !== 'granted' ? "Grant mic permission first" : "Start session")}
-                    >
-                        {isConnecting ? (
-                            <>
-                                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Connecting...
-                            </>
-                        ) : isConnected ? (
-                            <><MicOff className="mr-2 h-5 w-5" /> Stop Session</>
-                        ) : (
-                            <><Mic className="mr-2 h-5 w-5" /> Start Session</>
-                        )}
-                    </Button>
+            {/* Camera Button */}
+            <Button
+                variant="outline"
+                size="icon"
+                onClick={requestCameraPermission}
+                disabled={cameraPermission === 'granted' && (isConnected || isConnecting)}
+                title={cameraTooltip}
+                className={cn({
+                    "hover:bg-muted": cameraPermission !== 'granted' && !isConnected && !isConnecting,
+                    "cursor-not-allowed opacity-50": cameraPermission === 'granted' && (isConnected || isConnecting),
+                    "border-green-500": cameraPermission === 'granted'
+                })}
+            >
+                {getCameraIcon()}
+            </Button>
 
-                    {/* Clear Conversation Button */}
-                    <Button 
-                        onClick={clearConversation} 
-                        variant="outline"
-                        size="icon"
-                        className="rounded-full"
-                        title="Clear conversation"
-                        // Also disable clear button if mic permission is needed but denied?
-                        // Or allow clearing even if mic is denied?
-                        disabled={isConnecting} 
-                     >
-                         <Trash2 className="h-5 w-5" />
-                     </Button>
-                </div>
+            {/* Share Screen & Start Session Button */}
+            <Button
+                variant="default"
+                size="icon"
+                onClick={shareScreenAndStartSession}
+                disabled={!canStartSession || isConnected || isConnecting}
+                title={startTooltip}
+                className={cn(
+                    "bg-green-600 hover:bg-green-700 text-white",
+                    { "cursor-not-allowed opacity-50": !canStartSession || isConnected || isConnecting }
+                )}
+            >
+                <ScreenShareIcon className="h-5 w-5" />
+            </Button>
 
-                {/* Status Text Area */}
-                <div className="text-center text-sm text-muted-foreground h-5 mt-1">
-                     {/* Add status for mic permission */}
-                     {micPermission === 'denied' && <span className="text-red-600 font-medium">Mic access denied</span>}
-                     {micPermission === 'prompt' && <span className="text-yellow-600 font-medium">Mic permission needed</span>}
-                     {/* Show other statuses only if permission is granted */} 
-                     {micPermission === 'granted' && isConnected && !isSpeaking && currentUtterance && <span className="text-blue-600 font-medium">Listening...</span>} 
-                     {micPermission === 'granted' && isConnected && isSpeaking && <span className="text-green-600 font-medium">Assistant Speaking...</span>} 
-                     {micPermission === 'granted' && !isConnected && !isConnecting && <span>Ready to connect</span>}
-                </div>
+            {/* Stop Session Button */}
+            <Button
+                variant="destructive"
+                size="icon"
+                onClick={stopSession}
+                disabled={!isConnected && !isConnecting}
+                title="Stop Session"
+                className={cn({
+                    "cursor-not-allowed opacity-50": !isConnected && !isConnecting,
+                    "animate-pulse": isConnecting
+                })}
+            >
+                <PhoneOffIcon className="h-5 w-5" />
+            </Button>
+
+            {/* Clear Conversation Button */}
+            <Button
+                variant="outline"
+                size="icon"
+                onClick={clearConversation}
+                title="Clear Conversation History"
+                disabled={isConnected || isConnecting}
+                className={cn({
+                    "cursor-not-allowed opacity-50": isConnected || isConnecting
+                })}
+            >
+                <EraserIcon className="h-5 w-5" />
+            </Button>
+
+            {/* Status Text Area */}
+            <div className="text-center text-sm text-muted-foreground h-5 mt-1">
+                {micPermission === 'denied' && <span className="text-red-600 font-medium">Mic access denied</span>}
+                {micPermission === 'granted' && cameraPermission !== 'granted' && !isConnected && !isConnecting && <span className="text-yellow-600 font-medium">Camera permission needed</span>}
+                {canStartSession && !isConnected && !isConnecting && <span>Ready to Share Screen & Start</span>}
+                {micPermission === 'granted' && cameraPermission === 'granted' && isConnected && !isSpeaking && <span className="text-blue-600 font-medium">Listening...</span>}
+                {micPermission === 'granted' && cameraPermission === 'granted' && isConnected && isSpeaking && <span className="text-green-600 font-medium">Assistant Speaking...</span>}
             </div>
-        </>
+        </div>
     );
 };
 
-export default ChatControls; 
+export default ChatControls;
