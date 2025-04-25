@@ -59,7 +59,6 @@ const useSocraticStore = create<SocraticState>()(
         set((state) => {
           const shouldChange = state.isSocraticModeActive !== isActive;
           if (!shouldChange) return state; // No change needed
-
           if (!isActive) { // Deactivating
             console.log("[SocraticStore] Deactivating Socratic mode, resetting related state.");
             return {
@@ -70,28 +69,13 @@ const useSocraticStore = create<SocraticState>()(
               generatedSocraticPrompt: null,
               isGeneratingPrompt: false,
               socraticDialogueState: 'idle',
-              // REMOVED: Resetting EMT state
-              /*
-              sessionExpectations: [],
-              sessionMisconceptions: [],
-              currentTurnEvaluation: null,
-              coveredExpectations: [],
-              encounteredMisconceptions: [],
-              */
             };
           } else { // Activating
-             console.log("[SocraticStore] Activating Socratic mode (keeping existing topic/mode if set).");
-             return { 
-                 isSocraticModeActive: true,
-                 // Keep existing core values
-                 currentSocraticTopic: state.currentSocraticTopic, 
-                 selectedSocraticMode: state.selectedSocraticMode,
-                 retrievedSocraticContext: state.retrievedSocraticContext,
-                 generatedSocraticPrompt: state.generatedSocraticPrompt,
-                 isGeneratingPrompt: state.isGeneratingPrompt, 
-                 socraticDialogueState: state.socraticDialogueState, 
-                 // REMOVED: Keeping EMT state (no longer exists)
-             }; 
+            console.log("[SocraticStore] Activating Socratic mode (keeping existing topic/mode if set). State:", state);
+            return {
+              ...state,
+              isSocraticModeActive: true,
+            };
           }
         });
       },
@@ -128,7 +112,7 @@ const useSocraticStore = create<SocraticState>()(
 
       generatedSocraticPrompt: null,
       setGeneratedSocraticPrompt: (prompt) => {
-        console.log(`[SocraticStore] setGeneratedSocraticPrompt called (length: ${prompt?.length})`);
+        console.log(`[SocraticStore] setGeneratedSocraticPrompt called (length: ${prompt?.length})`, prompt ? '(Prompt content starts with: ' + prompt.substring(0, 50) + '...)' : '(Prompt is null/undefined)');
         set({ generatedSocraticPrompt: prompt });
       },
 
@@ -163,3 +147,4 @@ const useSocraticStore = create<SocraticState>()(
 );
 
 export default useSocraticStore;
+export type { SocraticState };

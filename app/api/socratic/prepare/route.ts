@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { MODEL as RESPONSES_MODEL } from '@/config/constants';
 
 const openai = new OpenAI();
-const PROMPT_GENERATION_MODEL = "o4-mini";
+const PROMPT_GENERATION_MODEL = "gpt-4o-mini";
 
 // --- Interface angepasst: nur noch 'instructions' ---
 interface GeneratedSocraticOutput {
@@ -16,7 +16,7 @@ interface GeneratedSocraticOutput {
 // --- getContextFromVectorStore function bleibt unverändert ---
 async function getContextFromVectorStore(vectorStoreId: string, topic: string): Promise<string> {
     // ... (Code wie gehabt) ...
-    console.log(`Retrieving context for topic "${topic}" from VS ${vectorStoreId} (max 15 results)`);
+    console.log(`Retrieving context for topic "${topic}" from VS ${vectorStoreId} (max 2 results)`);
     try {
         const response = await openai.responses.create({
             model: RESPONSES_MODEL,
@@ -26,7 +26,7 @@ async function getContextFromVectorStore(vectorStoreId: string, topic: string): 
             tools: [{
                 type: "file_search",
                 vector_store_ids: [vectorStoreId],
-                max_num_results: 20
+                max_num_results: 2
             }],
             stream: false,
             instructions: "Focus on extracting and summarizing information relevant to the topic query for a learning context. Include key details and examples. Conciseness is secondary to capturing useful information for tutoring."

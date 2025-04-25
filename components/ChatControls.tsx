@@ -1,24 +1,28 @@
 import React from 'react';
 import { Button } from "@/components/ui/button";
-import { PhoneOffIcon, ScreenShareIcon } from 'lucide-react'; 
+import { PhoneOffIcon, ScreenShareIcon, HelpCircle } from 'lucide-react'; 
 import { cn } from "@/lib/utils";
 
 interface ChatControlsProps {
-    shareScreenAndStartSession: () => void;
-    stopSession: () => void;
+    onStartClick: () => void;
+    onStopClick: () => void;
     isConnected: boolean;
     isConnecting: boolean;
     isSpeaking: boolean;
     canStartSession: boolean;
+    handleHelpClick: () => void;
+    helpLoading?: boolean;
 }
 
 const ChatControls: React.FC<ChatControlsProps> = ({
-    shareScreenAndStartSession,
-    stopSession,
+    onStartClick,
+    onStopClick,
     isConnected,
     isConnecting,
     isSpeaking,
     canStartSession,
+    handleHelpClick,
+    helpLoading = false,
 }) => {
     let startTooltip = "Share Screen & Start Session";
     if (isConnected || isConnecting) {
@@ -29,37 +33,51 @@ const ChatControls: React.FC<ChatControlsProps> = ({
 
     return (
         <div className="flex items-center justify-center gap-3 p-3 bg-card rounded-lg flex-wrap">
-            {/* Share Screen & Start Session Button */}
-            <Button
-                variant="outline"
-                onClick={shareScreenAndStartSession}
-                disabled={!canStartSession || isConnected || isConnecting}
-                title={startTooltip}
-                className={cn(
-                    "rounded-full",
-                    { "cursor-not-allowed opacity-50": !canStartSession || isConnected || isConnecting }
-                )}
-            >
-                <ScreenShareIcon className="h-5 w-5 mr-2" />
-                Start Session
-            </Button>
+            {/* Entweder Start oder Stop Session Button */}
+            {!isConnected && !isConnecting ? (
+                <Button
+                    variant="outline"
+                    onClick={onStartClick}
+                    disabled={!canStartSession}
+                    title={startTooltip}
+                    className={cn(
+                        "rounded-full",
+                        { "cursor-not-allowed opacity-50": !canStartSession }
+                    )}
+                >
+                    <ScreenShareIcon className="h-5 w-5 mr-2" />
+                    Start Session
+                </Button>
+            ) : (
+                <Button
+                    variant="outline"
+                    onClick={onStopClick}
+                    disabled={!isConnected && !isConnecting}
+                    title="Stop Session"
+                    className={cn(
+                        "rounded-full",
+                        { 
+                            "cursor-not-allowed opacity-50": !isConnected && !isConnecting,
+                            "animate-pulse": isConnecting 
+                        }
+                    )}
+                >
+                    <PhoneOffIcon className="h-5 w-5 mr-2" />
+                    Stop Session
+                </Button>
+            )}
 
-            {/* Stop Session Button */}
+            {/* Help Button */}
             <Button
                 variant="outline"
-                onClick={stopSession}
-                disabled={!isConnected && !isConnecting}
-                title="Stop Session"
-                className={cn(
-                    "rounded-full",
-                    { 
-                        "cursor-not-allowed opacity-50": !isConnected && !isConnecting,
-                        "animate-pulse": isConnecting 
-                    }
-                )}
+                size="icon"
+                onClick={handleHelpClick}
+                disabled={helpLoading}
+                title="Call help"
+                className="rounded-full"
             >
-                <PhoneOffIcon className="h-5 w-5 mr-2" />
-                Stop Session
+                <HelpCircle className="h-5 w-5" />
+                <span className="sr-only">Call help</span>
             </Button>
 
             {/* Status Text Area */}

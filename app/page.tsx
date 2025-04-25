@@ -1,6 +1,4 @@
 "use client";
-// Remove useState, useCallback imports
-// import { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
     Sheet,
@@ -10,36 +8,88 @@ import {
     SheetTrigger,
     SheetDescription,
 } from "@/components/ui/sheet";
-// Remove unused icons if necessary, keep PanelLeft
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogDescription,
+    DialogFooter,
+    DialogTrigger,
+    DialogClose,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { PanelLeft } from "lucide-react";
 import ToolsPanel from "@/components/tools-panel";
 import RealtimeChat from "@/components/realtime-chat";
-// Remove ModeToggle and VoiceSelector imports
-// import { ModeToggle } from "@/components/mode-toggle";
-// import VoiceSelector from "@/components/voice-selector";
+import { OnboardingDialog } from "@/components/OnboardingDialog";
+import { useSessionControlStore } from "@/stores/useSessionControlStore";
 
-// Remove type definition if not used elsewhere here
-// type ViewMode = "transcript" | "voiceOnly";
+import React, { useState } from "react";
+import useInterfaceStore from "@/stores/useInterfaceStore";
 
 export default function Main() {
-  // Remove local state and callback for viewMode
-  // const [viewMode, setViewMode] = useState<ViewMode>("transcript");
-  // const toggleViewMode = useCallback(() => {
-  //     setViewMode((prevMode) => (prevMode === "transcript" ? "voiceOnly" : "transcript"));
-  // }, []);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === "1234") {
+      setDialogOpen(false);
+      setSheetOpen(true);
+      setPassword("");
+      setError("");
+    } else {
+      setError("Falsches Passwort.");
+    }
+  };
+
+  const appMode = useInterfaceStore((state) => state.appMode);
+  // Onboarding-Dialog State aus Store
+  const showOnboardingDialog = useSessionControlStore((s) => s.showOnboardingDialog);
+  const closeOnboarding = useSessionControlStore((s) => s.closeOnboarding);
 
   return (
+    <>
       <div className="flex h-screen w-screen bg-background relative">
           {/* Header Buttons Group (Top Left) - Simplified */}
           <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
-            {/* Sheet component for the ToolsPanel - Only trigger remains */}
-            <Sheet>
-                <SheetTrigger asChild>
-                    <Button variant="outline" size="icon" title="Open Tools Panel">
-                        <PanelLeft className="h-4 w-4" />
-                        <span className="sr-only">Open Tools Panel</span>
-                    </Button>
-                </SheetTrigger>
+            {/* Dialog für Passwortschutz */}
+            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="icon" title="Konfiguration öffnen">
+                  <PanelLeft className="h-4 w-4" />
+                  <span className="sr-only">Konfiguration öffnen</span>
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Konfiguration geschützt</DialogTitle>
+                  <DialogDescription>
+                    Bitte Passwort eingeben, um die Einstellungen zu öffnen.
+                  </DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handlePasswordSubmit} className="space-y-4">
+                  <Input
+                    type="password"
+                    placeholder="Passwort"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    autoFocus
+                  />
+                  {error && <div className="text-destructive text-sm">{error}</div>}
+                  <DialogFooter>
+                    <Button type="submit">Bestätigen</Button>
+                    <DialogClose asChild>
+                      <Button type="button" variant="ghost">Abbrechen</Button>
+                    </DialogClose>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
+            {/* Sheet für ToolsPanel, nur nach Passwort sichtbar */}
+            <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
                 <SheetContent side="left" className="w-full sm:w-[400px] overflow-y-auto p-0">
                     <SheetHeader className="p-6 pb-4 border-b">
                         <SheetTitle>Configuration</SheetTitle>
@@ -52,17 +102,15 @@ export default function Main() {
                     </div>
                 </SheetContent>
             </Sheet>
-
-            {/* REMOVED: View Mode Toggle Button */}
-            {/* REMOVED: Theme Toggle Button (ModeToggle) */}
-            {/* REMOVED: Voice Selector Button */}
           </div>
 
           {/* Main content area (Chat) */}
-          <div className="flex-grow h-full pt-16"> {/* Keep padding-top */}
-              {/* Remove viewMode prop */}
+          <div className="flex-grow h-full pt-16">
+              {/* OnboardingDialog für Research Mode */}
+              <OnboardingDialog isOpen={showOnboardingDialog} onClose={closeOnboarding} />
               <RealtimeChat />
           </div>
       </div>
+    </>
   );
 }

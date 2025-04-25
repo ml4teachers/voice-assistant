@@ -5,11 +5,11 @@ import WebSearchConfig from "./websearch-config";
 import FunctionsView from "./functions-view";
 import PanelConfig from "./panel-config";
 import useToolsStore from "@/stores/useToolsStore";
-import useSocraticStore from "@/stores/useSocraticStore";
+import useSocraticStore, { type SocraticState } from "@/stores/useSocraticStore";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
-import { BrainCircuit, BotIcon, Eye, Lock, Wrench, Trash2, MessageSquareQuoteIcon, MicIcon, VideoIcon, VideoOffIcon, MicOffIcon } from "lucide-react";
+import { BrainCircuit, BotIcon, Eye, Lock, Wrench, Trash2, MessageSquareQuoteIcon, MicIcon, VideoIcon, VideoOffIcon, MicOffIcon, DownloadIcon } from "lucide-react";
 import { SocraticConfigDialog } from "./SocraticConfigDialog";
 import {
   Accordion,
@@ -21,12 +21,17 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "@/components/ui/toggle-group";
-import { useInterfaceStore } from "@/stores/useInterfaceStore";
+import useInterfaceStore from "@/stores/useInterfaceStore";
 import VoiceSelector from "./voice-selector";
 import { ModeToggle } from "./mode-toggle";
 import useConversationStore from "@/stores/useConversationStore";
 import { cn } from "@/lib/utils";
 import { useShallow } from 'zustand/react/shallow'; // Import useShallow
+import { exportChatAsTxt } from "@/components/export-chat-txt";
+import { SlidersHorizontal } from "lucide-react";
+
+// Typen für Zustand-Callbacks
+import type { StoreState as InterfaceStoreState } from "@/stores/useInterfaceStore";
 
 export default function ToolsPanel() {
   const {
@@ -38,18 +43,22 @@ export default function ToolsPanel() {
     setFunctionsEnabled,
   } = useToolsStore();
 
+  // Typisiere useSocraticStore Callback
   const {
     isSocraticModeActive,
     currentSocraticTopic,
     selectedSocraticMode,
     setIsSocraticModeActive,
-  } = useSocraticStore(useShallow((state) => ({ // Use useShallow
-    isSocraticModeActive: state.isSocraticModeActive,
-    currentSocraticTopic: state.currentSocraticTopic,
-    selectedSocraticMode: state.selectedSocraticMode,
-    setIsSocraticModeActive: state.setIsSocraticModeActive,
-  })));
+  } = useSocraticStore(
+    useShallow((state: SocraticState) => ({
+      isSocraticModeActive: state.isSocraticModeActive,
+      currentSocraticTopic: state.currentSocraticTopic,
+      selectedSocraticMode: state.selectedSocraticMode,
+      setIsSocraticModeActive: state.setIsSocraticModeActive,
+    }))
+  );
 
+  // Typisiere useInterfaceStore Callback
   const {
     viewMode,
     selectedVoice,
@@ -59,16 +68,22 @@ export default function ToolsPanel() {
     setSelectedVoice,
     requestMicAccess,
     requestCamAccess,
-  } = useInterfaceStore(useShallow((state) => ({ // Use useShallow
-    viewMode: state.viewMode,
-    selectedVoice: state.selectedVoice,
-    micPermission: state.micPermission,
-    cameraPermission: state.cameraPermission,
-    setViewMode: state.setViewMode,
-    setSelectedVoice: state.setSelectedVoice,
-    requestMicAccess: state.requestMicAccess,
-    requestCamAccess: state.requestCamAccess,
-  })));
+    appMode,
+    setAppMode
+  } = useInterfaceStore(
+    useShallow((state) => ({
+      viewMode: state.viewMode,
+      selectedVoice: state.selectedVoice,
+      micPermission: state.micPermission,
+      cameraPermission: state.cameraPermission,
+      setViewMode: state.setViewMode,
+      setSelectedVoice: state.setSelectedVoice,
+      requestMicAccess: state.requestMicAccess,
+      requestCamAccess: state.requestCamAccess,
+      appMode: state.appMode,
+      setAppMode: state.setAppMode
+    }))
+  );
 
   const clearConversation = useConversationStore((state) => state.rawSet);
 
@@ -80,8 +95,7 @@ export default function ToolsPanel() {
   };
 
   return (
-    <Accordion type="single" collapsible className="w-full space-y-4">
-
+    <Accordion type="multiple" className="w-full">
       {/* Assistant Behavior Accordion Item */}
       <AccordionItem value="assistant">
         <AccordionTrigger className="text-sm font-medium">
@@ -142,29 +156,50 @@ export default function ToolsPanel() {
           </div>
         </AccordionTrigger>
         <AccordionContent className="pt-4 space-y-4">
-           {/* View Mode Toggle Group */}
+           {/* View Mode Toggle Button */}
            <div className="space-y-2">
              <h3 className="text-sm font-medium text-muted-foreground">View Mode</h3>
-             <ToggleGroup
-               type="single"
+             <Button
                variant="outline"
-               value={viewMode}
-               onValueChange={(value) => { if (value) setViewMode(value as 'transcript' | 'voiceOnly'); }}
-               className="justify-start"
+               className="flex items-center gap-2"
+               onClick={() => setViewMode(viewMode === 'transcript' ? 'voiceOnly' : 'transcript')}
              >
-               <ToggleGroupItem value="transcript" aria-label="Transcript view" title="Transcript View">
-                 <MessageSquareQuoteIcon className="h-4 w-4" />
-               </ToggleGroupItem>
-               <ToggleGroupItem value="voiceOnly" aria-label="Voice only view" title="Voice Only View">
-                 <MicIcon className="h-4 w-4" />
-               </ToggleGroupItem>
-             </ToggleGroup>
+               {viewMode === 'transcript' ? (
+                 <>
+                   <MicIcon className="h-4 w-4" />
+                   Nur Stimme anzeigen
+                 </>
+               ) : (
+                 <>
+                   <MessageSquareQuoteIcon className="h-4 w-4" />
+                   Transkript anzeigen
+                 </>
+               )}
+             </Button>
            </div>
            {/* Theme Toggle */}
            <div className="space-y-2">
              <h3 className="text-sm font-medium text-muted-foreground">Theme</h3>
              <ModeToggle />
            </div>
+        </AccordionContent>
+      </AccordionItem>
+
+      {/* App Mode Accordion Item */}
+      <AccordionItem value="appMode">
+        <AccordionTrigger className="text-sm font-medium">
+          <div className="flex items-center">
+            <SlidersHorizontal className="mr-2 h-4 w-4" /> App Mode
+          </div>
+        </AccordionTrigger>
+        <AccordionContent className="pt-4">
+          <div className="flex flex-col gap-2">
+            <span className="text-xs text-muted-foreground mb-1">Wähle den Modus der App:</span>
+            <ToggleGroup type="single" value={appMode} onValueChange={v => v && setAppMode(v as 'developer' | 'research')}>
+              <ToggleGroupItem value="developer">Developer</ToggleGroupItem>
+              <ToggleGroupItem value="research">Research</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
         </AccordionContent>
       </AccordionItem>
 
@@ -252,13 +287,24 @@ export default function ToolsPanel() {
           </div>
         </AccordionTrigger>
         <AccordionContent className="pt-4">
-          <Button
-            variant="outline"
-            className="w-full justify-start"
-            onClick={handleClearConversation}
-          >
-            Clear Conversation History
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button
+              variant="destructive"
+              className="w-full justify-start"
+              onClick={handleClearConversation}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Konversation löschen
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={exportChatAsTxt}
+            >
+              <DownloadIcon className="mr-2 h-4 w-4" />
+              Chatverlauf als TXT exportieren
+            </Button>
+          </div>
         </AccordionContent>
       </AccordionItem>
 

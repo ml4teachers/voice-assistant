@@ -22,7 +22,13 @@ import { useAudioFrequencyData } from '@/hooks/useAudioVolumeAnalyzer';
 import { Tool } from './realtime-types';
 import { useRecording } from '@/hooks/useRecording';
 import { useMediaStore } from '@/stores/mediaStreamStore';
-import { useInterfaceStore, setPermissionRequestFunctions } from '@/stores/useInterfaceStore';
+import useInterfaceStore, { setPermissionRequestFunctions, type StoreState } from '@/stores/useInterfaceStore';
+import { useShallow } from 'zustand/react/shallow';
+import { useSessionControlStore } from '@/stores/useSessionControlStore';
+import FeedbackSurvey from './FeedbackSurvey';
+import PostSessionOptions from './PostSessionOptions';
+
+// Typ für Zustand-Callback
 
 type SessionStatus = "DISCONNECTED" | "CONNECTING" | "CONNECTED" | "ERROR";
 
@@ -49,12 +55,23 @@ export default function RealtimeChat() {
     const remoteRafIdRef = useRef<number | null>(null);
     const baseTools = useMemo(() => getTools(), []);
 
-    const viewMode = useInterfaceStore((state) => state.viewMode);
-    const selectedVoice = useInterfaceStore((state) => state.selectedVoice);
-    const micPermission = useInterfaceStore((state) => state.micPermission);
-    const cameraPermission = useInterfaceStore((state) => state.cameraPermission);
-    const setMicPermission = useInterfaceStore((state) => state.setMicPermission);
-    const setCameraPermission = useInterfaceStore((state) => state.setCameraPermission);
+    const {
+        viewMode,
+        selectedVoice,
+        micPermission,
+        cameraPermission,
+        setMicPermission,
+        setCameraPermission
+    } = useInterfaceStore(
+        useShallow((state: StoreState) => ({
+            viewMode: state.viewMode,
+            selectedVoice: state.selectedVoice,
+            micPermission: state.micPermission,
+            cameraPermission: state.cameraPermission,
+            setMicPermission: state.setMicPermission,
+            setCameraPermission: state.setCameraPermission
+        }))
+    );
 
     const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
     const [isSocraticGeneratingPrompt, setIsSocraticGeneratingPrompt] = useState(false);
@@ -247,10 +264,16 @@ export default function RealtimeChat() {
     const localFrequencyData = useAudioFrequencyData(micStream);
     const remoteFrequencyData = useAudioFrequencyData(remoteStream);
 
+    const appMode = useInterfaceStore((state) => state.appMode);
+
+    const { startRequestConfig, directStartRequested, clearStartRequest, openOnboarding } = useSessionControlStore();
+
+    // _startSessionInternal zuerst deklarieren
     const _startSessionInternal = useCallback(async (
         micStreamInternal: MediaStream,
         camStreamInternal: MediaStream | null,
-        screenStreamInternal: MediaStream
+        screenStreamInternal: MediaStream | null,
+        forceRecording: boolean = false
     ) => {
         console.log("--- [_startSessionInternal] Starting internal logic --- ");
         if (!micStreamInternal) {
@@ -258,21 +281,25 @@ export default function RealtimeChat() {
             cleanupConnection("Internal error: Mic stream missing.");
             return;
         }
-        if (!screenStreamInternal) {
+        if (appMode === 'research' && !screenStreamInternal) {
+            // Nur im Research-Mode ist ScreenStream Pflicht
             console.error("[_startSessionInternal] Error: screenStreamInternal is null or undefined. Aborting.");
             cleanupConnection("Internal error: Screen stream missing.");
             return;
         }
-        console.log(`[_startSessionInternal] Received Streams: Mic=${micStreamInternal.id}, Cam=${camStreamInternal?.id || 'N/A'}, Screen=${screenStreamInternal.id}`);
+        // Logging ggf. anpassen:
+        console.log(`[_startSessionInternal] Received Streams: Mic=${micStreamInternal.id}, Cam=${camStreamInternal?.id || 'N/A'}, Screen=${screenStreamInternal?.id || 'N/A'}`);
 
         setIsAssistantSpeaking(false);
         setSessionStatus('CONNECTING');
-        console.log("[_startSessionInternal] Status set to CONNECTING.");
         rawSetConversation({ chatMessages: [] });
-
         sessionIdRef.current = crypto.randomUUID();
-        const participantId = prompt("Teilnehmer-ID:", `P_${sessionIdRef.current.substring(0, 4)}`) || `P_Unknown_${sessionIdRef.current.substring(0, 4)}`;
-        if (participantId) localStorage.setItem('participantId', participantId);
+        let participantId: string;
+        if (appMode === 'research') {
+            participantId = localStorage.getItem('participantId') || `P_Unknown_${sessionIdRef.current.substring(0, 4)}`;
+        } else {
+            participantId = `DEV_${sessionIdRef.current.substring(0, 4)}`;
+        }
         console.log(`[_startSessionInternal] SESSION_METADATA;${sessionIdRef.current};${participantId};...`);
 
         if (!remoteAudioElement.current) {
@@ -281,7 +308,16 @@ export default function RealtimeChat() {
             return;
         }
         const toolsForSession = getTools();
-        console.log("[_startSessionInternal] Tools prepared. Attempting createRealtimeConnection...");
+        console.log("[_startSessionInternal] Tools prepared. Reading Socratic state...");
+
+        // Read Socratic state HERE
+        const socraticState = useSocraticStore.getState();
+        const instructionsForConnection = (socraticState.isSocraticModeActive && socraticState.generatedSocraticPrompt)
+            ? socraticState.generatedSocraticPrompt
+            : null;
+        console.log(`[_startSessionInternal] Socratic state read. Instructions length for connection: ${instructionsForConnection?.length ?? 0}`);
+
+        console.log("[_startSessionInternal] Attempting createRealtimeConnection...");
         let connection: { pc: RTCPeerConnection; dc: RTCDataChannel } | null = null;
         try {
             connection = await createRealtimeConnection(
@@ -290,7 +326,6 @@ export default function RealtimeChat() {
                 micStreamInternal,
                 handleRemoteStream
             );
-             console.log("[_startSessionInternal] createRealtimeConnection call finished.");
         } catch (connError) {
             console.error("[_startSessionInternal] Error during createRealtimeConnection:", connError);
             cleanupConnection("Connection failed");
@@ -312,49 +347,54 @@ export default function RealtimeChat() {
         dcRef.current.onopen = () => {
             console.log("[_startSessionInternal] >>> DataChannel opened <<< ");
             setSessionStatus('CONNECTED');
-            console.log("[_startSessionInternal] Status set to CONNECTED.");
+            // LOG HIER EINFÜGEN:
+            console.log('[RealtimeChat onopen] Checking Socratic State BEFORE sending update:', useSocraticStore.getState());
+            const socraticState = useSocraticStore.getState();
+            const currentInstructions = (socraticState.isSocraticModeActive && socraticState.generatedSocraticPrompt)
+                ? socraticState.generatedSocraticPrompt
+                : DEVELOPER_PROMPT;
+            console.log("[RealtimeChat] currentInstructions length:", currentInstructions.length);
+            console.log("[RealtimeChat] currentInstructions (start):", currentInstructions.slice(0, 200));
 
             let remoteAudioStreamFromElement: MediaStream | null = null;
             if (remoteAudioElement.current && remoteAudioElement.current.srcObject instanceof MediaStream) {
                 remoteAudioStreamFromElement = remoteAudioElement.current.srcObject;
-                 console.log(`[_startSessionInternal] Got remote audio stream from element: ${remoteAudioStreamFromElement?.id || 'N/A'}`);
-            } else {
-                 console.warn("[_startSessionInternal] Could not get remote audio stream from element when DC opened.");
+            }
+            if (appMode === 'research') {
+                // Nur im Research-Mode: startRecording mit ScreenStream
+                try {
+                    if (forceRecording) {
+                        startRecording(
+                            micStreamInternal,
+                            camStreamInternal,
+                            screenStreamInternal!,
+                            remoteAudioStreamFromElement
+                        );
+                        console.log('[Onboarding/Research] startRecording() called successfully.');
+                    }
+                } catch (recordingError) {
+                    console.error("[_startSessionInternal] Error calling startRecording:", recordingError);
+                    setLastError('Fehler beim Start der Aufnahme.');
+                }
             }
 
-            console.log("[_startSessionInternal] DataChannel open. Calling startRecording() NOW...");
-            try {
-                startRecording(
-                    micStreamInternal, 
-                    camStreamInternal, 
-                    screenStreamInternal,
-                    remoteAudioStreamFromElement
-                 );
-                console.log("[_startSessionInternal] startRecording() called successfully.");
-            } catch (recordingError) {
-                console.error("[_startSessionInternal] Error calling startRecording:", recordingError);
-                setLastError("Failed to start recording after connection.");
-            }
-
-            const currentSelectedVoice = useInterfaceStore.getState().selectedVoice;
-            const currentInstructions = DEVELOPER_PROMPT;
             const initialSessionUpdate = {
                 type: "session.update",
                 session: {
                     modalities: ["audio", "text"],
                     input_audio_format: "pcm16",
-                    output_audio_format: "pcm16", 
-                    input_audio_transcription: { model: "gpt-4o-mini-transcribe" }, 
-                    voice: currentSelectedVoice,
+                    output_audio_format: "pcm16",
+                    input_audio_transcription: { model: "gpt-4o-mini-transcribe" },
+                    voice: useInterfaceStore.getState().selectedVoice,
                     turn_detection: {
                          type: "semantic_vad",
                          eagerness: "high",
                          create_response: true,
-                         interrupt_response: true, 
+                         interrupt_response: true,
                      },
-                    instructions: currentInstructions,
-                    tools: toolsForSession, 
-                    tool_choice: "auto", 
+                    instructions: currentInstructions, // <-- RESTORED
+                    tools: toolsForSession,
+                    tool_choice: "auto",
                  }
              };
             console.log("[_startSessionInternal] Sending session.update payload...");
@@ -405,95 +445,92 @@ export default function RealtimeChat() {
 
      }, [
          rawSetConversation, createRealtimeConnection, handleRemoteStream, sendEvent, cleanupConnection,
-         startRecording, remoteAudioElement, getTools, handleServerEventRef,
+         startRecording, remoteAudioElement, getTools, handleServerEventRef, appMode, setLastError
      ]);
 
-    const handleShareScreenAndStartSession = useCallback(async () => {
-        console.log(`--- [handleShareScreenAndStartSession] Initiated.`);
+    // Initiate Session aus Config (Onboarding oder Dev)
+    const initiateSessionFromConfig = useCallback(async (config: { participantId: string; topic: string; mode: string }, forceRecording: boolean) => {
         setLastError(null);
         clearRecordingError();
-
+        // Permissions prüfen
         const currentMicPerm = useInterfaceStore.getState().micPermission;
         const currentCamPerm = useInterfaceStore.getState().cameraPermission;
-
-        if (sessionStatus !== 'DISCONNECTED' && sessionStatus !== 'ERROR') {
-            console.warn("[handleShareScreenAndStartSession] Session already active or connecting.");
+        if (currentMicPerm !== 'granted' || currentCamPerm !== 'granted') {
+            setLastError('Bitte erteile Mikrofon- und Kamerazugriff.');
             return;
         }
-        if (currentMicPerm !== "granted") {
-            setLastError("Mikrofonberechtigung fehlt.");
-            console.error("[handleShareScreenAndStartSession] Microphone permission not granted.");
-            return;
-        }
-        if (currentCamPerm !== "granted") {
-            setLastError("Kameraberechtigung fehlt.");
-            console.error("[handleShareScreenAndStartSession] Camera permission not granted.");
-            return;
-        }
-
         let currentMicStream = useMediaStore.getState().micStream;
         if (!currentMicStream) {
-            console.log("[handleShareScreenAndStartSession] Mic stream not active, attempting to activate...");
-            const micStreamResult = await requestMicrophoneAccess();
-            if (!micStreamResult) {
-                setLastError("Mikrofon konnte nicht aktiviert werden.");
-                console.error("[handleShareScreenAndStartSession] Failed to activate microphone stream.");
+            currentMicStream = await requestMicrophoneAccess();
+            if (!currentMicStream) {
+                setLastError('Mikrofon konnte nicht aktiviert werden.');
                 return;
             }
-            currentMicStream = micStreamResult;
-            console.log("[handleShareScreenAndStartSession] Mic stream activated.");
         }
-
         let currentCameraStream = useMediaStore.getState().cameraStream;
         if (!currentCameraStream) {
-            console.log("[handleShareScreenAndStartSession] Camera stream not active, attempting to activate...");
             await handleRequestCameraPermission();
             currentCameraStream = useMediaStore.getState().cameraStream;
             if (!currentCameraStream) {
-                 setLastError("Kamera-Stream nach Aktivierung nicht gefunden.");
-                 console.error("[handleShareScreenAndStartSession] Camera stream not found in store even after successful activation request.");
-                 return;
+                setLastError('Kamera-Stream nach Aktivierung nicht gefunden.');
+                return;
             }
-            console.log("[handleShareScreenAndStartSession] Camera stream activated.");
         }
+        let screenStream: MediaStream | null = null;
+        if (forceRecording) {
+            screenStream = await requestScreenPermission();
+            if (!screenStream) {
+                setLastError('Bildschirmfreigabe fehlgeschlagen oder abgelehnt.');
+                return;
+            }
+        }
+        _startSessionInternal(currentMicStream, currentCameraStream, forceRecording ? screenStream : null, forceRecording);
+    }, [requestMicrophoneAccess, handleRequestCameraPermission, requestScreenPermission, _startSessionInternal, clearRecordingError]);
 
-        console.log("[handleShareScreenAndStartSession] Requesting screen permission NOW...");
-        const screenStreamFromRequest = await requestScreenPermission();
+    // Start-Trigger-Effect
+    useEffect(() => {
+        const config = useSessionControlStore.getState().startRequestConfig;
+        const directStart = useSessionControlStore.getState().directStartRequested;
+        const mode = useInterfaceStore.getState().appMode;
+        // LOG HIER EINFÜGEN:
+        console.log('[RealtimeChat useEffect Trigger] Checking Socratic State BEFORE init:', useSocraticStore.getState());
+        if (config && mode === 'research') {
+            console.log('Received start request from onboarding:', config);
+            initiateSessionFromConfig(config, true);
+            useSessionControlStore.getState().clearStartRequest();
+        } else if (directStart && mode === 'developer') {
+            console.log('Received direct start request for developer mode.');
+            const devConfig = { participantId: 'developer', topic: 'general', mode: 'General' };
+            initiateSessionFromConfig(devConfig, false);
+            useSessionControlStore.getState().clearStartRequest();
+        }
+    }, [startRequestConfig, directStartRequested, initiateSessionFromConfig]);
 
-        if (screenStreamFromRequest) {
-            console.log("[handleShareScreenAndStartSession] Screen permission granted. Starting internal session logic...");
-            _startSessionInternal(
-                currentMicStream,
-                currentCameraStream,
-                screenStreamFromRequest
-            );
+    // handleStartClick für ChatControls
+    const handleStartClick = useCallback(() => {
+        const currentAppMode = useInterfaceStore.getState().appMode;
+        if (currentAppMode === 'research') {
+            useSessionControlStore.getState().openOnboarding();
         } else {
-            console.error("[handleShareScreenAndStartSession] Screen permission denied or failed. Aborting.");
-            setLastError("Bildschirmfreigabe fehlgeschlagen oder abgelehnt.");
+            useSessionControlStore.getState().requestDirectStart();
         }
+    }, []);
 
-    }, [
-        sessionStatus,
-        requestMicrophoneAccess,
-        handleRequestCameraPermission,
-        requestScreenPermission,
-        _startSessionInternal,
-        clearRecordingError,
-        setLastError,
-    ]);
+    // Post-Session Flow State
+    const [postSessionStep, setPostSessionStep] = useState<'options' | 'survey' | null>(null);
+    const [surveyAnswers, setSurveyAnswers] = useState<Record<string, number | string> | null>(null);
 
     const stopSession = useCallback(() => {
         console.log("[RealtimeChat] stopSession called.");
         setIsAssistantSpeaking(false);
         setSessionStatus('DISCONNECTED');
         if (recordingError) clearRecordingError();
-        setLastError(null);
-
         stopRecording();
-        cleanupConnection("Session ended");
-
+        cleanupConnection(null); // Kein Fehlertext beim normalen Stop
         setRemoteStream(null);
         setIsSocraticGeneratingPrompt(false);
+        // Nach Beenden: Post-Session-Options anzeigen
+        setPostSessionStep('options');
     }, [
         stopRecording,
         cleanupConnection,
@@ -505,49 +542,86 @@ export default function RealtimeChat() {
         setIsSocraticGeneratingPrompt
     ]);
 
-    useEffect(() => {
-        return () => {
-            console.log("RealtimeChat component unmounting. Cleaning up...");
-            cleanupConnection("Component unmounted");
-        };
-    }, [cleanupConnection]);
-
-    useEffect(() => {
-        if (recordingStatus === 'stopped' && 
-            recordedData.combinedBlob && 
-            recordedData.screenBlob && 
-            recordedData.assistantBlob && 
-            sessionIdRef.current)
-        {
-            const participantId = localStorage.getItem('participantId') || `P_Unknown_${sessionIdRef.current.substring(0, 4)}`;
-            console.log("Recording fully stopped, triggering ALL 3 downloads...");
-
-            const combinedBlobType = recordedData.combinedBlob.type;
-            let combinedExtension = 'webm'; 
-             if (combinedBlobType.includes('mp4')) combinedExtension = 'mp4';
-            console.log(`[Download Effect] Determined combined file extension: .${combinedExtension} from blob type: ${combinedBlobType}`);
-            downloadFile(recordedData.combinedBlob, `${sessionIdRef.current}_${participantId}_Combined_(Cam+Mic).${combinedExtension}`);
-
-            const screenBlobType = recordedData.screenBlob.type;
-            let screenExtension = 'webm'; 
-             if (screenBlobType.includes('mp4')) screenExtension = 'mp4';
-            console.log(`[Download Effect] Determined screen file extension: .${screenExtension} from blob type: ${screenBlobType}`);
-            downloadFile(recordedData.screenBlob, `${sessionIdRef.current}_${participantId}_Screen.${screenExtension}`);
-
-            const assistantBlobType = recordedData.assistantBlob.type;
-            let assistantExtension = 'bin'; 
-            if (assistantBlobType.includes('wav')) assistantExtension = 'wav';
-            else if (assistantBlobType.includes('opus')) assistantExtension = 'opus'; 
-            else if (assistantBlobType.includes('webm')) assistantExtension = 'webm';
-            else if (assistantBlobType.includes('mp4')) assistantExtension = 'm4a'; 
-            else if (assistantBlobType.includes('aac')) assistantExtension = 'aac';
-            console.log(`[Download Effect] Determined assistant file extension: .${assistantExtension} from blob type: ${assistantBlobType}`);
-            downloadFile(recordedData.assistantBlob, `${sessionIdRef.current}_${participantId}_AssistantAudio.${assistantExtension}`);
-
-        } else if (recordingStatus === 'stopped') {
-             console.warn(`[Download Effect] Recording stopped, but not all blobs are ready: Combined=${!!recordedData.combinedBlob}, Screen=${!!recordedData.screenBlob}, Assistant=${!!recordedData.assistantBlob}`);
+    // Helper: TXT-Export
+    function formatDataForTxt(transcript: Item[], surveyData: Record<string, number | string> | null): string {
+        // Format wie in export-chat-txt: User/Assistant: Text
+        const lines = transcript
+            .filter((msg) => msg.type === "message" && typeof (msg as any).role === "string" && Array.isArray((msg as any).content))
+            .map((msg: any) => {
+                const who = msg.role === "user" ? "User" : "Assistant";
+                const text = msg.content?.[0]?.text ?? "";
+                return `${who}: ${text}`;
+            });
+        let txt = lines.join("\n\n");
+        txt += '\n\n=== FEEDBACK ===\n';
+        if (surveyData) {
+            Object.entries(surveyData).forEach(([key, value]) => {
+                txt += `${key}: ${value}\n`;
+            });
         }
-    }, [recordingStatus, recordedData, downloadFile, sessionIdRef]);
+        return txt;
+    }
+
+    function downloadTxtFile(content: string, filename: string) {
+        try {
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            a.remove();
+            console.log(`[Download] Triggered download for ${filename}`);
+        } catch (err) {
+            console.error("Error creating TXT download link:", err);
+        }
+    }
+
+    // Handler für Post-Session Optionen & Survey
+    const handleContinueTopic = () => {
+        console.log("TODO: Implement Continue Topic");
+        setPostSessionStep(null);
+    };
+    const handleNewTopic = () => {
+        console.log("Resetting for new topic...");
+        const socraticStore = useSocraticStore.getState();
+        socraticStore.setIsSocraticModeActive(false);
+        socraticStore.setCurrentSocraticTopic(null);
+        socraticStore.setSelectedSocraticMode(null);
+        socraticStore.setRetrievedSocraticContext(null);
+        socraticStore.setGeneratedSocraticPrompt(null);
+        socraticStore.setIsGeneratingPrompt(false);
+        socraticStore.setSocraticDialogueState('idle');
+        useConversationStore.getState().rawSet({ chatMessages: [] });
+        setPostSessionStep(null);
+        useSessionControlStore.getState().openOnboarding();
+    };
+    const handleEndExperiment = () => {
+        setPostSessionStep('survey');
+    };
+    const handleSurveySubmit = (answers: Record<string, number | string>) => {
+        console.log("Survey submitted:", answers);
+        setSurveyAnswers(answers);
+        const currentTranscript = useConversationStore.getState().chatMessages;
+        const formattedContent = formatDataForTxt(currentTranscript, answers);
+        const participantId = localStorage.getItem('participantId') || `P_Unknown_${sessionIdRef.current?.substring(0, 4) || 'NoSession'}`;
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `Session_${sessionIdRef.current?.substring(0, 8) || 'NoSessionID'}_${participantId}_Feedback_${timestamp}.txt`;
+        downloadTxtFile(formattedContent, filename);
+        // Download der drei Mediendateien (wie in useRecording)
+        if (recordedData.combinedBlob) downloadFile(recordedData.combinedBlob, `Video_CamMic_${timestamp}.webm`);
+        if (recordedData.screenBlob) downloadFile(recordedData.screenBlob, `Screen_${timestamp}.webm`);
+        if (recordedData.assistantBlob) downloadFile(recordedData.assistantBlob, `AssistantAudio_${timestamp}.webm`);
+        // Nach Abschluss alles zurücksetzen
+        useConversationStore.getState().rawSet({ chatMessages: [] });
+        useSocraticStore.getState().setIsSocraticModeActive(false);
+        setPostSessionStep(null); // Kein Dialog mehr anzeigen
+        // Optional: Interface-Store zurücksetzen (z.B. ViewMode)
+        // useInterfaceStore.getState().setViewMode('transcript');
+    };
 
     const isCameraStreamActive = !!cameraStream;
     const isMicPermissionGranted = micPermission === 'granted';
@@ -555,62 +629,100 @@ export default function RealtimeChat() {
 
     const canStartSession = isMicPermissionGranted && isCameraPermissionGranted && (sessionStatus === 'DISCONNECTED' || sessionStatus === 'ERROR');
 
+    const [helpLoading, setHelpLoading] = useState(false);
+
+    const handleHelpClick = async () => {
+        setHelpLoading(true);
+        try {
+            const response = await fetch("/api/notify-help", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: "Hilfe von einem Studienteilnehmer angefordert!" }),
+            });
+            if (response.ok) {
+                alert("Hilfe wurde benachrichtigt.");
+            } else {
+                alert("Fehler beim Senden der Hilfeanfrage.");
+            }
+        } catch (error) {
+            console.error("Error sending help request:", error);
+            alert("Netzwerkfehler beim Senden der Hilfeanfrage.");
+        } finally {
+            setHelpLoading(false);
+        }
+    };
+
     return (
-         <div className={cn("flex flex-col h-full p-4 gap-4 bg-background")}>
-             <div className="max-w-4xl w-full mx-auto flex flex-col h-full gap-4">
+        <div className={cn("flex flex-col h-full p-4 gap-4 bg-background")}> 
+            <div className="max-w-4xl w-full mx-auto flex flex-col h-full gap-4">
                 <div className="flex justify-center items-center flex-shrink-0">
                     <h2 className="text-xl font-semibold text-foreground">Realtime Voice Assistant</h2>
                 </div>
 
-                {viewMode === 'transcript' && <ErrorDisplay lastError={lastError || recordingError} />}
-
-                <div className="flex-shrink-0">
-                    <ChatControls
-                        shareScreenAndStartSession={handleShareScreenAndStartSession}
-                        stopSession={stopSession}
-                        isConnected={sessionStatus === 'CONNECTED'}
-                        isConnecting={sessionStatus === 'CONNECTING'}
-                        isSpeaking={isAssistantSpeaking}
-                        canStartSession={canStartSession}
-                    />
-                </div>
-
-                {viewMode === 'transcript' ? (
-                    <div
-                        ref={chatContainerRef}
-                        className={cn(
-                            "flex-grow rounded-md bg-card",
-                            "h-0 min-h-[150px]",
-                            "overflow-y-auto p-4 space-y-4",
-                             isSocraticModeActiveUI ? 'rounded-b-md rounded-t-none' : 'rounded-md'
-                        )}
-                    >
-                        {chatMessages.length === 0 && sessionStatus === 'CONNECTING' &&
-                            <div className="flex justify-center items-center h-full">
-                                 <div className="text-center text-muted-foreground italic">Connecting...</div>
+                {/* Conditional Rendering für Post-Session-Flow */}
+                {(sessionStatus === 'CONNECTED' || sessionStatus === 'CONNECTING' || (sessionStatus === 'DISCONNECTED' && !postSessionStep)) ? (
+                    <>
+                        {viewMode === 'transcript' && lastError && <ErrorDisplay lastError={lastError || recordingError} />}
+                        <div className="flex-shrink-0">
+                            <ChatControls
+                                onStartClick={handleStartClick}
+                                onStopClick={stopSession}
+                                isConnected={sessionStatus === 'CONNECTED'}
+                                isConnecting={sessionStatus === 'CONNECTING'}
+                                isSpeaking={isAssistantSpeaking}
+                                canStartSession={canStartSession}
+                                handleHelpClick={handleHelpClick}
+                                helpLoading={helpLoading}
+                            />
+                        </div>
+                        {viewMode === 'transcript' ? (
+                            <div
+                                ref={chatContainerRef}
+                                className={cn(
+                                    "flex-grow rounded-md bg-card",
+                                    "h-0 min-h-[150px]",
+                                    "overflow-y-auto p-4 space-y-4",
+                                    isSocraticModeActiveUI ? 'rounded-b-md rounded-t-none' : 'rounded-md'
+                                )}
+                            >
+                                {chatMessages.length === 0 && sessionStatus === 'CONNECTING' &&
+                                    <div className="flex justify-center items-center h-full">
+                                        <div className="text-center text-muted-foreground italic">Connecting...</div>
+                                    </div>
+                                }
+                                {chatMessages.map((item: Item) => (
+                                    <React.Fragment key={item.id}>
+                                        {item.type === "message" && <Message message={item as MessageItem} />}
+                                        {item.type === "tool_call" && <ToolCall toolCall={item} />}
+                                    </React.Fragment>
+                                ))}
                             </div>
-                         }
-                        {chatMessages.map((item: Item) => (
-                            <React.Fragment key={item.id}>
-                                {item.type === "message" && <Message message={item as MessageItem} />}
-                                {item.type === "tool_call" && <ToolCall toolCall={item} />}
-                            </React.Fragment>
-                        ))}
-                    </div>
-                ) : (
-                    <VoiceOnlyView
-                        isAssistantSpeaking={isAssistantSpeaking}
-                        micPermission={micPermission}
-                        sessionStatus={sessionStatus}
-                        lastError={lastError}
-                        isSocraticModeActiveUI={isSocraticModeActiveUI}
-                        localFrequencyData={localFrequencyData}
-                        remoteFrequencyData={remoteFrequencyData}
+                        ) : (
+                            <VoiceOnlyView
+                                isAssistantSpeaking={isAssistantSpeaking}
+                                micPermission={micPermission}
+                                sessionStatus={sessionStatus}
+                                lastError={lastError}
+                                isSocraticModeActiveUI={isSocraticModeActiveUI}
+                                localFrequencyData={localFrequencyData}
+                                remoteFrequencyData={remoteFrequencyData}
+                            />
+                        )}
+                    </>
+                ) : postSessionStep === 'options' ? (
+                    <PostSessionOptions
+                        onContinueTopic={handleContinueTopic}
+                        onNewTopic={handleNewTopic}
+                        onEndExperiment={handleEndExperiment}
                     />
+                ) : postSessionStep === 'survey' ? (
+                    <FeedbackSurvey onSubmit={handleSurveySubmit} />
+                ) : (
+                    <div className="flex-grow flex items-center justify-center">Vielen Dank für Ihre Teilnahme!</div>
                 )}
 
-                 <audio ref={remoteAudioElement} hidden playsInline />
-             </div>
+                <audio ref={remoteAudioElement} hidden playsInline />
+            </div>
         </div>
     );
 }
