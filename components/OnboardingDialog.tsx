@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
@@ -22,17 +22,63 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
   // Korrigiere initialen Wert auf 'Tutoring' (statt 'Socratic')
   const [selectedMode, setSelectedMode] = useState<'Tutoring' | 'Assessment'>('Tutoring');
   const [selectedTopic, setSelectedTopic] = useState('');
+  const [selectedPredefinedKey, setSelectedPredefinedKey] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Wenn das Onboarding geöffnet wird, direkt zu Schritt 3 (Konfiguration) springen
-  React.useEffect(() => {
-    if (isOpen) setStep(3);
-  }, [isOpen]);
+  // Fehler/Step aus Store lesen
+  const onboardingErrorMessage = useSessionControlStore((state) => state.onboardingErrorMessage);
+  const forceOnboardingStep = useSessionControlStore((state) => state.forceOnboardingStep);
+  const clearForcedStep = useSessionControlStore((state) => state.clearForcedStep);
+  const setOnboardingError = useSessionControlStore((state) => state.setOnboardingError);
+
+  // Step-Steuerung bei Dialog-Öffnung/forceStep
+  useEffect(() => {
+    if (isOpen) {
+      if (forceOnboardingStep !== null) {
+        console.log(`[OnboardingDialog] Force opening step ${forceOnboardingStep}`);
+        setStep(forceOnboardingStep);
+        clearForcedStep();
+        // Wenn explizit Schritt 1 erzwungen wird, alle lokalen States zurücksetzen
+        if (forceOnboardingStep === 1) {
+          setParticipantId('');
+          setConsent1Checked(false);
+          setConsent2Checked(false);
+          setSelectedMode('Tutoring');
+          setSelectedTopic('');
+          setSelectedPredefinedKey('');
+        }
+      } else {
+        setStep(1);
+      }
+    }
+  }, [isOpen, forceOnboardingStep, clearForcedStep]);
 
   // vectorStoreId richtig auslesen
   const vectorStoreId = useToolsStore((s) => s.vectorStore?.id);
   const { setCurrentSocraticTopic, setSelectedSocraticMode, setIsSocraticModeActive, setGeneratedSocraticPrompt } = useSocraticStore();
+
+  // Vordefinierte Themen/Fragen für Tutoring und Assessment
+  const tutoringTopics = [
+    { key: 'tutoring_wwi', label: 'Die Rolle der Schweiz im Ersten Weltkrieg (1914-1918)' },
+    { key: 'tutoring_interwar_radicalization', label: 'Radikalisierung in der Zwischenkriegszeit' },
+    { key: 'tutoring_wwii_refugee', label: 'Schweizer Flüchtlingspolitik im Zweiten Weltkrieg' },
+    { key: 'custom', label: 'Eigenes Thema eingeben...' }
+  ];
+
+  const assessmentTopics = [
+    { key: 'assessment_landesstreik', label: 'Landesstreik 1918: Faktoren und Reaktionen?' },
+    { key: 'assessment_interwar_crisis', label: 'Einfluss der Weltwirtschaftskrise in den 1930er Jahren?' },
+    { key: 'assessment_border_closure', label: 'Grenzschliessung 1942: Hintergründe und Folgen?' },
+    { key: 'custom', label: 'Eigene Frage/Thema...' }
+  ];
+
+  const allPredefinedTopics = [...tutoringTopics, ...assessmentTopics].reduce((acc, topic) => {
+    if (topic.key !== 'custom') {
+      acc[topic.key] = topic.label;
+    }
+    return acc;
+  }, {} as Record<string, string>);
 
   // Step 1: Intro
   const renderStep1 = () => (
@@ -82,40 +128,68 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
   );
 
   // Step 3: Config
-  const renderStep3 = () => (
-    <>
-      <DialogHeader>
-        <DialogTitle>Konfiguration</DialogTitle>
-      </DialogHeader>
-      <div className="py-2">
-        <div className="mb-4">
-          <label className="block mb-1">Modus</label>
-          <Select value={selectedMode} onValueChange={v => setSelectedMode(v as 'Tutoring' | 'Assessment')}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="Tutoring">Lerngespräch</SelectItem>
-              <SelectItem value="Assessment">Testgespräch</SelectItem>
-            </SelectContent>
-          </Select>
+  const renderStep3 = () => {
+    // Themenliste je nach Modus
+    const topicOptions = selectedMode === 'Tutoring' ? tutoringTopics : assessmentTopics;
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle>Konfiguration</DialogTitle>
+        </DialogHeader>
+        <div className="py-2">
+          <div className="mb-4">
+            <label className="block mb-1">Modus</label>
+            <Select value={selectedMode} onValueChange={v => {
+              setSelectedMode(v as 'Tutoring' | 'Assessment');
+              setSelectedPredefinedKey(''); // Reset bei Moduswechsel
+              setSelectedTopic('');
+            }}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Tutoring">Lerngespräch</SelectItem>
+                <SelectItem value="Assessment">Testgespräch</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="mb-4">
+            <label className="block mb-1">Vordefiniertes Thema/Frage wählen oder eigene Eingabe</label>
+            <Select value={selectedPredefinedKey} onValueChange={v => {
+              setSelectedPredefinedKey(v);
+              if (v !== 'custom') setSelectedTopic('');
+            }}>
+              <SelectTrigger><SelectValue placeholder="Bitte wählen..." /></SelectTrigger>
+              <SelectContent>
+                {topicOptions.map(item => (
+                  <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {selectedPredefinedKey === 'custom' && (
+            <div className="mt-4">
+              <label className="block mb-1">Eigenes Thema / Eigene Frage</label>
+              <Input
+                placeholder="Eigenes Thema/Frage eingeben..."
+                value={selectedTopic}
+                onChange={e => setSelectedTopic(e.target.value)}
+              />
+            </div>
+          )}
         </div>
-        <div className="mb-4">
-          <label className="block mb-1">Thema</label>
-          <Input
-            placeholder="Thema eingeben"
-            value={selectedTopic}
-            onChange={e => setSelectedTopic(e.target.value)}
-          />
-        </div>
-      </div>
-      <DialogFooter>
-        <Button variant="secondary" onClick={() => setStep(2)}>Zurück</Button>
-        <Button
-          onClick={handlePrepareSession}
-          disabled={!selectedTopic || !selectedMode}
-        >Vorbereiten</Button>
-      </DialogFooter>
-    </>
-  );
+        <DialogFooter>
+          <Button variant="secondary" onClick={() => setStep(2)}>Zurück</Button>
+          <Button
+            onClick={handlePrepareSession}
+            disabled={
+              !selectedMode ||
+              !selectedPredefinedKey ||
+              (selectedPredefinedKey === 'custom' && !selectedTopic)
+            }
+          >Vorbereiten</Button>
+        </DialogFooter>
+      </>
+    );
+  };
 
   // Step 4: Loading
   const renderStep4 = () => (
@@ -134,11 +208,27 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
   const renderStep5 = () => (
     <>
       <DialogHeader>
-        <DialogTitle>Fertig!</DialogTitle>
+        <DialogTitle>Letzter Schritt: Bildschirmfreigabe</DialogTitle>
       </DialogHeader>
-      <div className="py-4">Die Session ist vorbereitet. Sie können jetzt starten.</div>
+      <div className="py-4 flex flex-col items-center">
+        {onboardingErrorMessage && (
+          <p className="text-red-500 font-medium mb-3 text-center">{onboardingErrorMessage}</p>
+        )}
+        <video
+          src="/screen-share-guide.mp4"
+          controls
+          autoPlay
+          loop
+          muted
+          className="w-full rounded-lg shadow mb-4"
+          style={{ background: '#000' }}
+        />
+        <p className="mb-2 text-base">
+          <strong>WICHTIG:</strong> Für die Studie muss der gesamte Bildschirm geteilt werden. Klicken Sie gleich auf <b>'OK &amp; Freigabe starten'</b>, wählen Sie dann im Browser-Fenster den Tab <b>'Gesamter Bildschirm'</b>, klicken Sie auf die Bildschirsvorschau und dann auf <b>'Teilen'</b>.
+        </p>
+      </div>
       <DialogFooter>
-        <Button onClick={handleFinalStart}>Session starten</Button>
+        <Button onClick={handleTriggerScreenShareAndStart}>OK &amp; Freigabe starten</Button>
       </DialogFooter>
     </>
   );
@@ -148,20 +238,28 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
     setError(null);
     setStep(4);
     try {
+      let requestBody: any = {
+        mode: selectedMode,
+        vectorStoreId,
+        participantId,
+      };
+      if (selectedPredefinedKey === 'custom') {
+        requestBody.topic = selectedTopic;
+      } else {
+        requestBody.predefinedKey = selectedPredefinedKey;
+      }
       const res = await fetch('/api/socratic/prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participantId,
-          topic: selectedTopic,
-          mode: selectedMode,
-          vectorStoreId,
-        }),
+        body: JSON.stringify(requestBody),
       });
       if (!res.ok) throw new Error('Fehler bei der Vorbereitung');
       const data = await res.json();
-      // Reihenfolge korrigiert: Topic -> Mode -> Prompt -> Active
-      setCurrentSocraticTopic(selectedTopic);
+      // Topic für Store korrekt setzen
+      const topicForStore = selectedPredefinedKey === 'custom'
+        ? selectedTopic
+        : allPredefinedTopics[selectedPredefinedKey] || selectedPredefinedKey;
+      setCurrentSocraticTopic(topicForStore);
       setSelectedSocraticMode(selectedMode);
       setGeneratedSocraticPrompt(data.socraticPrompt);
       setIsSocraticModeActive(true);
@@ -174,17 +272,26 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
     }
   }
 
-  function handleFinalStart() {
-    // Delay, damit der Prompt sicher im Store ist, bevor die Session gestartet wird
-    setTimeout(() => {
-      useSessionControlStore.getState().requestStartFromOnboarding({
+  // Entferne handleFinalStart und ersetze durch neue Funktion
+  const handleTriggerScreenShareAndStart = () => {
+    setOnboardingError(null); // Fehler im Store löschen
+    console.log("[OnboardingDialog] Triggering final start sequence (requesting start via store).");
+
+    // Korrektes Thema für den Store ermitteln
+    const finalTopic = selectedPredefinedKey === 'custom'
+        ? selectedTopic
+        : allPredefinedTopics[selectedPredefinedKey] || selectedPredefinedKey; // Label oder Key als Fallback
+
+    // Startanfrage über den Store senden (dies löst den Prozess in RealtimeChat aus)
+    useSessionControlStore.getState().requestStartFromOnboarding({
         participantId,
-        topic: selectedTopic,
+        topic: finalTopic, // Verwende das ermittelte Thema
         mode: selectedMode,
-      });
-      onClose();
-    }, 500); // 500ms Delay wie im SocraticConfigDialog
-  }
+    });
+
+    // Dialog schliessen (wird von aussen gesteuert durch Store/prop)
+    onClose();
+};
 
   return (
     <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>

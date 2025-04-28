@@ -1,11 +1,11 @@
-// app/api/socratic/prepare/route.ts
-
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { MODEL as RESPONSES_MODEL } from '@/config/constants';
+import fs from 'fs/promises';
+import path from 'path';
 
 const openai = new OpenAI();
-const PROMPT_GENERATION_MODEL = "gpt-4o-mini";
+const PROMPT_GENERATION_MODEL = "o3-mini";
 
 // --- Interface angepasst: nur noch 'instructions' ---
 interface GeneratedSocraticOutput {
@@ -16,7 +16,7 @@ interface GeneratedSocraticOutput {
 // --- getContextFromVectorStore function bleibt unverändert ---
 async function getContextFromVectorStore(vectorStoreId: string, topic: string): Promise<string> {
     // ... (Code wie gehabt) ...
-    console.log(`Retrieving context for topic "${topic}" from VS ${vectorStoreId} (max 2 results)`);
+    console.log(`Retrieving context for topic "${topic}" from VS ${vectorStoreId} (max 20 results)`);
     try {
         const response = await openai.responses.create({
             model: RESPONSES_MODEL,
@@ -26,7 +26,7 @@ async function getContextFromVectorStore(vectorStoreId: string, topic: string): 
             tools: [{
                 type: "file_search",
                 vector_store_ids: [vectorStoreId],
-                max_num_results: 2
+                max_num_results: 20
             }],
             stream: false,
             instructions: "Focus on extracting and summarizing information relevant to the topic query for a learning context. Include key details and examples. Conciseness is secondary to capturing useful information for tutoring."
@@ -146,55 +146,53 @@ Output ONLY a valid JSON object containing exactly ONE key: "instructions".
  */
 export async function POST(request: Request) {
     try {
-        const { mode, topic, vectorStoreId } = await request.json();
+        const { mode, topic, predefinedKey, vectorStoreId, participantId } = await request.json();
 
-        if (!mode || !topic || !vectorStoreId) {
-            return NextResponse.json({ error: "Missing mode, topic, or vectorStoreId" }, { status: 400 });
+        if (!mode || !vectorStoreId || (!topic && !predefinedKey)) {
+            return NextResponse.json({ error: "Missing mode, vectorStoreId, and topic/predefinedKey" }, { status: 400 });
         }
 
-        const contextSummary = await getContextFromVectorStore(vectorStoreId, topic);
-        // Handle context retrieval failure (inkl. Fallback) - Logik bleibt, ruft aber die angepasste Generatorfunktion auf
-        if (contextSummary.startsWith("Error retrieving context:") || contextSummary === "No specific context found in documents." || contextSummary === "Failed to extract context summary from documents.") {
-            console.warn("Context retrieval failed, proceeding with fallback instruction generation.");
-            const fallbackResult = await generateSocraticInstructions(mode, topic, "No context available."); // Generate fallback instructions
-             const fallbackFinalPrompt = `
- <SOCRATIC_INSTRUCTIONS>
- ${fallbackResult.instructions}
- </SOCRATIC_INSTRUCTIONS>
+        let finalSocraticPrompt: string | null = null;
 
- <CONTEXT_FOR_TOPIC topic="${topic}">
- ${contextSummary}
- </CONTEXT_FOR_TOPIC>
-             `.trim();
-              return NextResponse.json({
-                  socraticPrompt: fallbackFinalPrompt, // Nur Prompt zurückgeben
-                  // openerQuestion: fallbackResult.opener_question // Entfernt
-              });
+        // 1. Versuche, vordefinierten Prompt zu laden
+        if (predefinedKey && predefinedKey !== 'custom') {
+            console.log(`Attempting to load pre-generated prompt for key: ${predefinedKey}`);
+            try {
+                const filename = `${predefinedKey}.json`;
+                const filePath = path.join(process.cwd(), 'config', 'preGeneratedSocraticPrompts', filename);
+                const fileContent = await fs.readFile(filePath, 'utf-8');
+                const parsedData = JSON.parse(fileContent);
+                if (parsedData.socraticPrompt) {
+                    finalSocraticPrompt = parsedData.socraticPrompt;
+                    console.log(`Successfully loaded pre-generated prompt for key: ${predefinedKey}`);
+                } else {
+                    console.error(`Pre-generated file ${filename} missing 'socraticPrompt' key.`);
+                    return NextResponse.json({ error: `Pre-generated file ${filename} missing 'socraticPrompt' key.` }, { status: 500 });
+                }
+            } catch (err) {
+                console.error(`Error loading pre-generated prompt file for key ${predefinedKey}:`, err);
+                return NextResponse.json({ error: `Failed to load pre-generated prompt for ${predefinedKey}` }, { status: 500 });
+            }
         }
 
-        // Step 2: Generate Instructions ONLY (using the updated function)
-        // --- Angepasst: Erwartet nur 'instructions' ---
-        const { instructions: generatedInstructions } = await generateSocraticInstructions(mode, topic, contextSummary);
+        // 2. Wenn kein vordefinierter Prompt geladen wurde UND ein custom topic da ist -> generieren
+        if (!finalSocraticPrompt && topic) {
+            console.log(`Generating new prompt for custom topic: ${topic}, Mode: ${mode}`);
+            const contextSummary = await getContextFromVectorStore(vectorStoreId, topic);
+            if (contextSummary.startsWith("Error retrieving context:")) {
+                return NextResponse.json({ error: contextSummary }, { status: 500 });
+            }
+            const { instructions } = await generateSocraticInstructions(mode, topic, contextSummary);
+            finalSocraticPrompt = `\n<SOCRATIC_INSTRUCTIONS>\n${instructions}\n</SOCRATIC_INSTRUCTIONS>\n\n<CONTEXT_FOR_TOPIC topic=\"${topic}\">\n${contextSummary}\n</CONTEXT_FOR_TOPIC>\n`.trim();
+            console.log("Successfully generated new Socratic prompt.");
+        }
 
-        // Step 3: Manually combine instructions and context
-        const finalSocraticPrompt = `
- <SOCRATIC_INSTRUCTIONS>
- ${generatedInstructions}
- </SOCRATIC_INSTRUCTIONS>
-
- <CONTEXT_FOR_TOPIC topic="${topic}">
- ${contextSummary}
- </CONTEXT_FOR_TOPIC>
-        `.trim();
-
-        console.log("Final combined Socratic Prompt (Instructions Only) length:", finalSocraticPrompt.length);
-
-        // Step 4: Return ONLY the final prompt
-        // --- Angepasst: Gibt nur 'socraticPrompt' zurück ---
-        return NextResponse.json({
-            socraticPrompt: finalSocraticPrompt,
-            // openerQuestion: openerQuestion // Entfernt
-        });
+        // 3. Ergebnis zurückgeben oder Fehler
+        if (finalSocraticPrompt) {
+            return NextResponse.json({ socraticPrompt: finalSocraticPrompt });
+        } else {
+            return NextResponse.json({ error: "Could not load or generate Socratic prompt." }, { status: 500 });
+        }
 
     } catch (error) {
         console.error("Error in /api/socratic/prepare:", error);
