@@ -322,7 +322,6 @@ export default function RealtimeChat() {
         let connection: { pc: RTCPeerConnection; dc: RTCDataChannel } | null = null;
         try {
             connection = await createRealtimeConnection(
-                remoteAudioElement,
                 toolsForSession,
                 micStreamInternal,
                 handleRemoteStream

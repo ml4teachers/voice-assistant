@@ -1,14 +1,5 @@
 import { RefObject } from "react";
-import { EphemeralTokenResponse, Tool } from '@/components/realtime-types'; // Assuming type is here
-
-// Define type for tool resources configuration - No longer needed here
-/*
-interface ToolResources {
-    file_search?: {
-        vector_store_ids?: string[];
-    };
-}
-*/
+import { EphemeralTokenResponse, Tool } from '@/components/realtime-types';
 
 // Modify fetchEphemeralKey to accept ONLY tools
 async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Remove tool_resources param
@@ -21,7 +12,6 @@ async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Rem
             body: JSON.stringify({ 
                 // Optionally send model if needed 
                 tools: tools, 
-                // tool_resources: tool_resources // <-- REMOVED
             }) 
         });
         if (!response.ok) {
@@ -43,12 +33,35 @@ async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Rem
 }
 
 export async function createRealtimeConnection(
-    audioElement: RefObject<HTMLAudioElement | null>, // ADD BACK for diagnosis
     tools: Tool[],
-    // Expect the MediaStream object as an argument
     mediaStream: MediaStream,
-    onRemoteTrack: (stream: MediaStream) => void // ADD this prop
+    onRemoteTrack: (stream: MediaStream) => void
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> {
+    // --- NEU: Fetch TURN Credentials FIRST ---
+    console.log("Fetching TURN credentials...");
+    let iceServers: RTCIceServer[] = [
+        // Fallback public STUN server
+        { urls: 'stun:stun.l.google.com:19302' }
+    ];
+    try {
+        const response = await fetch('/api/turn-credentials');
+        if (response.ok) {
+            const data = await response.json();
+            if (data.iceServers && Array.isArray(data.iceServers)) {
+                console.log("Successfully fetched TURN credentials from backend.");
+                iceServers = data.iceServers;
+            } else {
+                console.warn("Fetched TURN credentials response missing 'iceServers' array. Using STUN fallback.");
+            }
+        } else {
+            console.error(`Failed to fetch TURN credentials: ${response.status} ${await response.text()}. Using STUN fallback.`);
+        }
+    } catch (error) {
+        console.error("Network error fetching TURN credentials. Using STUN fallback.", error);
+    }
+    console.log("Using ICE Servers:", JSON.stringify(iceServers));
+    // --- Ende TURN Fetch ---
+
     const ephemeralKey = await fetchEphemeralKey(tools);
     if (!ephemeralKey) {
         console.error("Failed to get ephemeral key.");
@@ -56,43 +69,37 @@ export async function createRealtimeConnection(
     }
 
     let pc: RTCPeerConnection | null = null;
-
     try {
-        pc = new RTCPeerConnection();
-        console.log("PeerConnection created.");
+        // --- NEU: Verwende die geholten iceServers ---
+        const configuration: RTCConfiguration = {
+            iceServers: iceServers
+            // Optional: iceTransportPolicy: 'relay' // Zum Testen nur über TURN
+        };
+        pc = new RTCPeerConnection(configuration); // Übergib die Konfiguration
+        // -----------------------------------------
+        console.log("PeerConnection created with fetched ICE Servers.");
 
         pc.ontrack = (e) => {
             console.log(`[connection.ts ontrack] Event received. Kind: ${e.track.kind}, Streams: ${e.streams.length}`);
             if (e.track.kind === 'audio' && e.streams && e.streams[0]) {
                 console.log(`[connection.ts ontrack] Calling onRemoteTrack callback with stream ID: ${e.streams[0].id}`);
                 onRemoteTrack(e.streams[0]);
-                // --- REMOVE direct assignment to audioElement here ---
-                // The following code remains commented out / removed as intended
-                /*
-                // if (audioElement.current && e.track.kind === 'audio') {
-                //     if (audioElement.current.srcObject !== e.streams[0]) {
-                //         audioElement.current.srcObject = e.streams[0];
-                //         audioElement.current.play().catch(err => console.error("Audio playback failed:", err));
-                //     }
-                // }
-                */
-                // ---------------------------------------------------
             } else {
-                 console.warn("[connection.ts ontrack] Received track event without valid audio stream.");
+                console.warn("[connection.ts ontrack] Received track event without valid audio stream.");
             }
         };
 
         // Add tracks from the provided mediaStream
         if (mediaStream && mediaStream.getTracks().length > 0) {
             mediaStream.getTracks().forEach(track => {
-                if (pc) { // Check if pc still exists
+                if (pc) {
                     pc.addTrack(track, mediaStream);
                     console.log(`Track added from provided stream: ${track.kind}`);
                 }
             });
         } else {
-             console.error("Provided mediaStream is invalid or has no tracks.");
-             throw new Error("Invalid media stream provided.");
+            console.error("Provided mediaStream is invalid or has no tracks.");
+            throw new Error("Invalid media stream provided.");
         }
 
         const dc = pc.createDataChannel("oai-data-channel", { ordered: true });
@@ -102,8 +109,7 @@ export async function createRealtimeConnection(
         await pc.setLocalDescription(offer);
         console.log("Offer created and set as local description.");
 
-        // Select the appropriate model for the Realtime API session
-        const model = "gpt-4o-mini-realtime-preview"; // Or fetch from config/constants if different
+        const model = "gpt-4o-mini-realtime-preview";
         const sdpResponse = await fetch(`https://api.openai.com/v1/realtime?model=${model}`, {
             method: "POST",
             body: offer.sdp,
@@ -121,7 +127,6 @@ export async function createRealtimeConnection(
 
         const answerSdp = await sdpResponse.text();
         const answer: RTCSessionDescriptionInit = { type: "answer", sdp: answerSdp };
-        // Check signaling state before setting remote description
         if (pc.signalingState === 'have-local-offer') {
             await pc.setRemoteDescription(answer);
             console.log("Answer received and set as remote description. Connection setup successful.");
@@ -134,10 +139,9 @@ export async function createRealtimeConnection(
 
     } catch (error) {
         console.error("Error during WebRTC setup:", error);
-        // Cleanup resources on error
         if (pc && pc.connectionState !== 'closed') {
             pc.close();
         }
-        return null; // Indicate failure
+        return null;
     }
 }
