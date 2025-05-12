@@ -19,23 +19,23 @@ const likertOptions = [
 const questions = [
   {
     key: "q1",
-    text: "Wie zufrieden waren Sie mit dem Gesprächsfluss?",
+    text: "Wie natürlich hat sich der Wechsel zwischen Ihnen und dem KI-Partner während des Gesprächs angefühlt?",
   },
   {
     key: "q2",
-    text: "Wie hilfreich war der KI-Partner?",
+    text: "Inwieweit hat Sie der KI-Partner durch seine Fragen dabei unterstützt, das Prüfungsthema tiefer zu durchdenken?",
   },
   {
     key: "q3",
-    text: "Wie angenehm war die Sprachqualität?",
+    text: "Wie gut hatte der KI-Partner Ihrer Meinung nach Ihre Sprache verstanden?",
   },
   {
     key: "q4",
-    text: "Wie einfach war die Bedienung?",
+    text: "Hatten Sie das Gefühl, dass der KI-Partner Sie durch das Thema geleitet hat, ohne Ihnen die Antworten direkt vorzugeben?",
   },
   {
     key: "q5",
-    text: "Wie realistisch wirkte die Konversation?",
+    text: "Wie stark erinnerte Sie die Konversation an ein echtes Gespräch mit einem Menschen?",
   },
 ];
 
@@ -73,7 +73,7 @@ const FeedbackSurvey: React.FC<FeedbackSurveyProps> = ({ onSubmit }) => {
           <div key={q.key} className="flex flex-col gap-2">
             <Label>{q.text}</Label>
             <RadioGroup
-              className="flex flex-row gap-4 mt-1"
+              className="flex flex-row justify-between w-full mt-1"
               value={answers[q.key]?.toString() || ""}
               onValueChange={(val) => handleLikertChange(q.key, val)}
             >
@@ -85,9 +85,9 @@ const FeedbackSurvey: React.FC<FeedbackSurveyProps> = ({ onSubmit }) => {
                 />
               ))}
             </RadioGroup>
-            <div className="flex flex-row gap-4 ml-1 text-xs text-muted-foreground">
+            <div className="flex flex-row justify-between w-full text-xs text-muted-foreground">
               <span>1 = gar nicht</span>
-              <span className="ml-auto">5 = sehr</span>
+              <span>5 = sehr</span>
             </div>
           </div>
         ))}

@@ -113,21 +113,24 @@ export function useRecording() {
 
     // --- Request Screen Only (uses store) --- 
     const requestScreenPermission = useCallback(async (): Promise<MediaStream | null> => {
-         clearError();
-         console.log("[useRecording] Requesting screen permission...");
-         try {
-             const stream = await navigator.mediaDevices.getDisplayMedia({
-                  video: { cursor: "always" }, audio: { /* ... */ }
-             });
-             setScreenStream(stream); // Set stream in the store
-             console.log("[useRecording] Screen sharing permission granted.");
-             return stream;
-         } catch (err) {
-             setAndLogError("Bildschirmfreigabe fehlgeschlagen.", err);
-             setScreenStream(null); // Ensure store is cleared on error
-             return null;
-         }
-     }, [clearError, setAndLogError, setScreenStream]);
+        console.warn("[useRecording] requestScreenPermission is currently deactivated.");
+        // return null; // Temporarily deactivated
+        // Simulate permission denial or simply do nothing to prevent screen recording
+        // To re-enable, uncomment the original logic below
+        /*
+        try {
+            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+            setScreenStream(stream);
+            return stream;
+        } catch (err) {
+            console.error("Error getting screen media:", err);
+            setError("Screen sharing failed or was cancelled.");
+            setScreenStream(null);
+            return null;
+        }
+        */
+        return null; // Return null as it's deactivated
+    }, [setScreenStream, setError]);
 
     // --- Combined Permission Request (kept for potential internal use, but likely unused by UI now) --- 
     const requestPermissionsAndStreams = useCallback(async (): Promise<{
@@ -163,13 +166,12 @@ export function useRecording() {
     const startRecording = useCallback(( 
         microphoneStream: MediaStream, 
         cameraStream: MediaStream | null, 
-        screenStream: MediaStream, 
+        _screenStreamToIgnore: MediaStream | null, // Parameter wird ignoriert
         remoteAudioStream: MediaStream | null // <<< ADDED BACK remoteAudioStream >>>
     ) => {
          clearError();
          // ... stream validity checks (important to keep) ...
          if (!microphoneStream?.active || microphoneStream.getAudioTracks().length === 0) { /*...*/ return; }
-         if (!screenStream?.active || screenStream.getVideoTracks().length === 0) { /*...*/ return; }
          if (cameraStream && (!cameraStream?.active || cameraStream.getVideoTracks().length === 0)) { /*...*/ cameraStream = null; }
   
           console.log("[useRecording] Attempting to start recording (3 Recorders)...");
@@ -227,9 +229,9 @@ export function useRecording() {
               } else { /* Skip and mark ready */ combinedBlobReadyRef.current = true; }
   
               // Screen Recorder (Screen Video + Screen Audio)
-              if (screenStream.getTracks().length > 0) { 
+              if (cameraStream && cameraStream.getTracks().length > 0) { 
                 console.log(`[useRecording] Initializing screen recorder with type: ${chosenScreenMimeType}`);
-                screenRecorderRef.current = new MediaRecorder(screenStream, { mimeType: chosenScreenMimeType });
+                screenRecorderRef.current = new MediaRecorder(cameraStream, { mimeType: chosenScreenMimeType });
                 screenRecorderRef.current.ondataavailable = (e) => { if (e.data.size > 0) screenChunksRef.current.push(e.data); };
                 screenRecorderRef.current.onstop = () => { 
                     console.log("[useRecording] Screen recorder stopped.");
@@ -380,4 +382,4 @@ export function useRecording() {
         stopRecording,
         downloadFile,
     };
-} 
+}

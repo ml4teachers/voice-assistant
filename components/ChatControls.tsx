@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Button } from "@/components/ui/button";
 import { PhoneOffIcon, ScreenShareIcon, HelpCircle } from 'lucide-react'; 
 import { cn } from "@/lib/utils";
@@ -24,6 +24,45 @@ const ChatControls: React.FC<ChatControlsProps> = ({
     handleHelpClick,
     helpLoading = false,
 }) => {
+    const [remainingTime, setRemainingTime] = useState(300); // 5 minutes in seconds
+    const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+    useEffect(() => {
+        if (isConnected) {
+            setRemainingTime(600); // Reset timer when connection starts
+            timerRef.current = setInterval(() => {
+                setRemainingTime(prevTime => prevTime - 1);
+            }, 1000);
+        } else {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+                timerRef.current = null;
+            }
+            setRemainingTime(300); // Reset timer when disconnected
+        }
+
+        return () => {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+            }
+        };
+    }, [isConnected]);
+
+    useEffect(() => {
+        if (remainingTime === 0) {
+            if (timerRef.current) {
+                clearInterval(timerRef.current);
+            }
+            onStopClick();
+        }
+    }, [remainingTime, onStopClick]);
+
+    const formatTime = (seconds: number) => {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
     let startTooltip = "Share Screen & Start Session";
     if (isConnected || isConnecting) {
         startTooltip = isConnecting ? "Connecting..." : "Session active";
@@ -42,7 +81,8 @@ const ChatControls: React.FC<ChatControlsProps> = ({
                     title={startTooltip}
                     className={cn(
                         "rounded-full",
-                        { "cursor-not-allowed opacity-50": !canStartSession }
+                        { "cursor-not-allowed opacity-50": !canStartSession },
+                        { "animate-pulse-shadow": canStartSession } // <-- NEUE/WIEDERHERGESTELLTE ANIMATIONSKLASSE
                     )}
                 >
                     <ScreenShareIcon className="h-5 w-5 mr-2" />
@@ -81,10 +121,20 @@ const ChatControls: React.FC<ChatControlsProps> = ({
             </Button>
 
             {/* Status Text Area */}
-            <div className="text-center text-sm text-muted-foreground h-5 mt-1 w-full">
+            <div className="text-center text-sm text-muted-foreground h-10 mt-1 w-full flex flex-col justify-center items-center">
                  {isConnecting && <span>Connecting...</span>}
-                 {isConnected && !isSpeaking && <span className="text-blue-600 font-medium">Listening...</span>}
-                 {isConnected && isSpeaking && <span className="text-green-600 font-medium">Assistant Speaking...</span>}
+                 {isConnected && (
+                    <>
+                        <span className="text-primary font-medium">
+                            Verbleibende Zeit: {formatTime(remainingTime)}
+                        </span>
+                        {remainingTime <= 30 && remainingTime > 0 && (
+                            <span className="text-yellow-600 font-medium text-xs">
+                                Gespräch endet in Kürze
+                            </span>
+                        )}
+                    </>
+                 )}
                  {!isConnected && !isConnecting && canStartSession && <span>Ready to start</span>}
                  {!isConnected && !isConnecting && !canStartSession && <span className="text-yellow-600 font-medium">Check permissions in sidebar</span>}
             </div>

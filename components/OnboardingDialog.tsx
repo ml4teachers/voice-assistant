@@ -60,17 +60,31 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
 
   // Vordefinierte Themen/Fragen für Tutoring und Assessment
   const tutoringTopics = [
-    { key: 'tutoring_wwi', label: 'Die Rolle der Schweiz im Ersten Weltkrieg (1914-1918)' },
-    { key: 'tutoring_interwar_radicalization', label: 'Radikalisierung in der Zwischenkriegszeit' },
-    { key: 'tutoring_wwii_refugee', label: 'Schweizer Flüchtlingspolitik im Zweiten Weltkrieg' },
-    { key: 'custom', label: 'Eigenes Thema eingeben...' }
+    { key: 'tutoring_imperialismus', label: 'Imperialismus (1870-1914)' },
+    { key: 'tutoring_erster_weltkrieg', label: 'Erster Weltkrieg (1914-1918)' },
+    { key: 'tutoring_zwischenkriegszeit', label: 'Zwischenkriegszeit (1918-1939)' },
+    { key: 'tutoring_nationalsozialismus_zweiter_weltkrieg', label: 'Nationalsozialismus & Zweiter Weltkrieg (1933-1945)' },
+    { key: 'tutoring_kalter_krieg', label: 'Kalter Krieg (1945-1990)' },
+    { key: 'tutoring_ur_fruehgeschichte', label: 'Schweizer Ur- und Frühgeschichte' },
+    { key: 'tutoring_antike', label: 'Antike: Keltische und römische Schweiz' },
+    { key: 'tutoring_mittelalter', label: 'Schweiz im Mittelalter' },
+    { key: 'tutoring_ueberfremdung', label: 'Überfremdung' },
+    { key: 'tutoring_nukleardebatte', label: 'Nukleardebatte' },
+    { key: 'tutoring_frauenstimmrecht', label: 'Frauenstimmrecht in der Schweiz' },
   ];
 
   const assessmentTopics = [
-    { key: 'assessment_landesstreik', label: 'Landesstreik 1918: Faktoren und Reaktionen?' },
-    { key: 'assessment_interwar_crisis', label: 'Einfluss der Weltwirtschaftskrise in den 1930er Jahren?' },
-    { key: 'assessment_border_closure', label: 'Grenzschliessung 1942: Hintergründe und Folgen?' },
-    { key: 'custom', label: 'Eigene Frage/Thema...' }
+    { key: 'assessment_imperialismus', label: 'Imperialismus (1870-1914)' },
+    { key: 'assessment_erster_weltkrieg', label: 'Erster Weltkrieg (1914-1918)' },
+    { key: 'assessment_zwischenkriegszeit', label: 'Zwischenkriegszeit (1918-1939)' },
+    { key: 'assessment_nationalsozialismus_zweiter_weltkrieg', label: 'Nationalsozialismus & Zweiter Weltkrieg (1933-1945)' },
+    { key: 'assessment_kalter_krieg', label: 'Kalter Krieg (1945-1990)' },
+    { key: 'assessment_ur_fruehgeschichte', label: 'Schweizer Ur- und Frühgeschichte' },
+    { key: 'assessment_antike', label: 'Antike: Keltische und römische Schweiz' },
+    { key: 'assessment_mittelalter', label: 'Schweiz im Mittelalter' },
+    { key: 'assessment_ueberfremdung', label: 'Überfremdung' },
+    { key: 'assessment_nukleardebatte', label: 'Nukleardebatte' },
+    { key: 'assessment_frauenstimmrecht', label: 'Frauenstimmrecht in der Schweiz' },
   ];
 
   const allPredefinedTopics = [...tutoringTopics, ...assessmentTopics].reduce((acc, topic) => {
@@ -152,7 +166,7 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
             </Select>
           </div>
           <div className="mb-4">
-            <label className="block mb-1">Vordefiniertes Thema/Frage wählen oder eigene Eingabe</label>
+            <label className="block mb-1">Thema auswählen</label>
             <Select value={selectedPredefinedKey} onValueChange={v => {
               setSelectedPredefinedKey(v);
               if (v !== 'custom') setSelectedTopic('');
@@ -208,13 +222,14 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
   const renderStep5 = () => (
     <>
       <DialogHeader>
-        <DialogTitle>Letzter Schritt: Bildschirmfreigabe</DialogTitle>
+        {/* <DialogTitle>Letzter Schritt: Bildschirmfreigabe</DialogTitle> */}
+        <DialogTitle>Sitzung starten</DialogTitle> {/* Geänderter Titel */}
       </DialogHeader>
       <div className="py-4 flex flex-col items-center">
         {onboardingErrorMessage && (
           <p className="text-red-500 font-medium mb-3 text-center">{onboardingErrorMessage}</p>
         )}
-        <video
+        {/* <video
           src="/screen-share-guide.mp4"
           controls
           autoPlay
@@ -222,13 +237,17 @@ export const OnboardingDialog: React.FC<OnboardingDialogProps> = ({ isOpen, onCl
           muted
           className="w-full rounded-lg shadow mb-4"
           style={{ background: '#000' }}
-        />
-        <p className="mb-2 text-base">
+        /> */}
+        {/* <p className="mb-2 text-base">
           <strong>WICHTIG:</strong> Für die Studie muss der gesamte Bildschirm geteilt werden. Klicken Sie gleich auf <b>'OK &amp; Freigabe starten'</b>, wählen Sie dann im Browser-Fenster den Tab <b>'Gesamter Bildschirm'</b>, klicken Sie auf die Bildschirsvorschau und dann auf <b>'Teilen'</b>.
-        </p>
+        </p> */}
+        <p className="mb-2 text-base">
+          Klicken Sie auf <b>'Sitzung starten'</b>, um das Gespräch mit dem KI-Lernpartner zu beginnen.
+        </p> {/* Angepasster Text */}
       </div>
       <DialogFooter>
-        <Button onClick={handleTriggerScreenShareAndStart}>OK &amp; Freigabe starten</Button>
+        {/* <Button onClick={handleTriggerScreenShareAndStart}>OK &amp; Freigabe starten</Button> */}
+        <Button onClick={handleTriggerScreenShareAndStart}>Sitzung starten</Button> {/* Geänderter Button-Text */}
       </DialogFooter>
     </>
   );
