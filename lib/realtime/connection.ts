@@ -34,7 +34,7 @@ async function fetchEphemeralKey(tools: Tool[]): Promise<string | null> { // Rem
 
 export async function createRealtimeConnection(
     tools: Tool[],
-    mediaStream: MediaStream,
+    mediaStream: MediaStream | null,
     onRemoteTrack: (stream: MediaStream) => void
 ): Promise<{ pc: RTCPeerConnection; dc: RTCDataChannel } | null> {
     // --- NEU: Fetch TURN Credentials FIRST ---
@@ -89,7 +89,7 @@ export async function createRealtimeConnection(
             }
         };
 
-        // Add tracks from the provided mediaStream
+        // Add tracks from the provided mediaStream (optional in Demo-Modus)
         if (mediaStream && mediaStream.getTracks().length > 0) {
             mediaStream.getTracks().forEach(track => {
                 if (pc) {
@@ -98,8 +98,7 @@ export async function createRealtimeConnection(
                 }
             });
         } else {
-            console.error("Provided mediaStream is invalid or has no tracks.");
-            throw new Error("Invalid media stream provided.");
+            console.warn("No local media tracks provided. Continuing without local tracks (likely Demo mode).");
         }
 
         const dc = pc.createDataChannel("oai-data-channel", { ordered: true });

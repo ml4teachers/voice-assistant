@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import ToolCall from "./tool-call";
 import Message from "./message";
 import Annotations from "./annotations";
-import { Item } from "@/lib/assistant";
+import { Item } from "@/hooks/useHandleRealtimeEvents";
 
 interface ChatProps {
   items: Item[];

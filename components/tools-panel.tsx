@@ -195,9 +195,10 @@ export default function ToolsPanel() {
         <AccordionContent className="pt-4">
           <div className="flex flex-col gap-2">
             <span className="text-xs text-muted-foreground mb-1">Wähle den Modus der App:</span>
-            <ToggleGroup type="single" value={appMode} onValueChange={v => v && setAppMode(v as 'developer' | 'research')}>
+            <ToggleGroup type="single" value={appMode} onValueChange={v => v && setAppMode(v as 'developer' | 'research' | 'demo')}>
               <ToggleGroupItem value="developer">Developer</ToggleGroupItem>
               <ToggleGroupItem value="research">Research</ToggleGroupItem>
+              <ToggleGroupItem value="demo">Demo</ToggleGroupItem>
             </ToggleGroup>
           </div>
         </AccordionContent>

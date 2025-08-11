@@ -8,12 +8,12 @@ interface StoreState {
   selectedVoice: string;
   micPermission: 'prompt' | 'granted' | 'denied';
   cameraPermission: 'prompt' | 'granted' | 'denied';
-  appMode: 'developer' | 'research';
+  appMode: 'developer' | 'research' | 'demo';
   setViewMode: (mode: ViewMode) => void;
   setSelectedVoice: (voice: string) => void;
   setMicPermission: (status: 'prompt' | 'granted' | 'denied') => void;
   setCameraPermission: (status: 'prompt' | 'granted' | 'denied') => void;
-  setAppMode: (mode: 'developer' | 'research') => void;
+  setAppMode: (mode: 'developer' | 'research' | 'demo') => void;
   // Placeholder for actions that will eventually call the request functions
   requestMicAccess: () => void;
   requestCamAccess: () => void;
@@ -30,7 +30,7 @@ const useInterfaceStore = create<StoreState>()(
       selectedVoice: 'echo',
       micPermission: 'prompt',
       cameraPermission: 'prompt',
-      appMode: 'developer',
+      appMode: 'demo',
       setViewMode: (mode) => set({ viewMode: mode }),
       setSelectedVoice: (voice) => set({ selectedVoice: voice }),
       setMicPermission: (status) => set({ micPermission: status }),

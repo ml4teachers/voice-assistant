@@ -182,7 +182,7 @@ export default function RealtimeChat() {
     useEffect(() => {
         const activateCameraIfGranted = async () => {
             const currentCamPerm = useInterfaceStore.getState().cameraPermission;
-            if (currentCamPerm === 'granted') {
+            if (currentCamPerm === 'granted' && useInterfaceStore.getState().appMode !== 'demo') {
                 console.log("[Permission Effect] Camera initially granted, attempting activation...");
                 handleRequestCameraPermission();
             }
@@ -204,7 +204,7 @@ export default function RealtimeChat() {
             const initialState = permissionStatus.state;
             console.log("[Permission Effect] Initial camera permission state:", initialState);
             setCameraPermission(initialState);
-            if (initialState === 'granted') {
+            if (initialState === 'granted' && useInterfaceStore.getState().appMode !== 'demo') {
                 console.log("[Permission Effect] Camera initially granted, attempting activation...");
                 setTimeout(activateCameraIfGranted, 100);
             }
@@ -212,7 +212,7 @@ export default function RealtimeChat() {
                 const newState = permissionStatus.state;
                 console.log("[Permission Effect] Camera permission changed to:", newState);
                 setCameraPermission(newState);
-                 if (newState === 'granted') {
+                 if (newState === 'granted' && useInterfaceStore.getState().appMode !== 'demo') {
                      activateCameraIfGranted();
                  } else if (newState === 'denied') {
                      console.log("[Permission Effect] Camera denied after load, ensuring stream is stopped.");
@@ -351,9 +351,11 @@ export default function RealtimeChat() {
         console.log("[_startSessionInternal] Attempting createRealtimeConnection...");
         let connection: { pc: RTCPeerConnection; dc: RTCDataChannel } | null = null;
         try {
+            // Auch im Demo-Modus den Mikrofon-Stream senden (keine Aufzeichnung, aber Audio für die Session nötig)
+            const localStreamForConnection = micStreamInternal;
             connection = await createRealtimeConnection(
                 toolsForSession,
-                micStreamInternal,
+                localStreamForConnection,
                 handleRemoteStream
             );
         } catch (connError) {
@@ -398,6 +400,8 @@ export default function RealtimeChat() {
                     console.error("[_startSessionInternal] Error calling startRecording:", recordingError);
                     setLastError('Fehler beim Start der Aufnahme.');
                 }
+            } else if (appMode === 'demo') {
+                console.log('[Demo Mode] Keine Aufnahme wird gestartet.');
             }
 
             const socraticState = useSocraticStore.getState();
@@ -498,9 +502,17 @@ export default function RealtimeChat() {
         clearRecordingError();
         const currentMicPerm = useInterfaceStore.getState().micPermission;
         const currentCamPerm = useInterfaceStore.getState().cameraPermission;
-        if (currentMicPerm !== 'granted' || currentCamPerm !== 'granted') {
-            setLastError('Bitte erteile Mikrofon- und Kamerazugriff.');
-            return;
+        const modeNow = useInterfaceStore.getState().appMode;
+        if (modeNow === 'demo') {
+            if (currentMicPerm !== 'granted') {
+                setLastError('Bitte erteile Mikrofonzugriff.');
+                return;
+            }
+        } else {
+            if (currentMicPerm !== 'granted' || currentCamPerm !== 'granted') {
+                setLastError('Bitte erteile Mikrofon- und Kamerazugriff.');
+                return;
+            }
         }
         if (!micStream) {
             setLastError('Mikrofon konnte nicht aktiviert werden.');
@@ -557,18 +569,21 @@ export default function RealtimeChat() {
              if (!currentMicStream) {
                  currentMicStream = await requestMicrophoneAccess();
              }
-             let currentCameraStream = useMediaStore.getState().cameraStream;
-             if (!currentCameraStream && useInterfaceStore.getState().cameraPermission === 'granted') {
-                 // Corrected function name
-                 const camResult = await handleRequestCameraPermission();
-                 // Warte, bis der Kamera-Stream im Store gesetzt ist (max. 1 Sekunde)
-                 for (let i = 0; i < 10; i++) {
-                   currentCameraStream = useMediaStore.getState().cameraStream;
-                   if (currentCameraStream) break;
-                   await new Promise(res => setTimeout(res, 100));
-                 }
-                 currentCameraStream = isMediaStream(currentCameraStream) ? currentCameraStream : null;
-             }
+              let currentCameraStream = useMediaStore.getState().cameraStream;
+              if (useInterfaceStore.getState().appMode !== 'demo') {
+                  if (!currentCameraStream && useInterfaceStore.getState().cameraPermission === 'granted') {
+                      const camResult = await handleRequestCameraPermission();
+                      // Warte, bis der Kamera-Stream im Store gesetzt ist (max. 1 Sekunde)
+                      for (let i = 0; i < 10; i++) {
+                        currentCameraStream = useMediaStore.getState().cameraStream;
+                        if (currentCameraStream) break;
+                        await new Promise(res => setTimeout(res, 100));
+                      }
+                      currentCameraStream = isMediaStream(currentCameraStream) ? currentCameraStream : null;
+                  }
+              } else {
+                  currentCameraStream = null; // Demo: keine Kamera
+              }
 
              if (!currentMicStream) {
                   console.log("Mikrofon-Stream nicht verfügbar. Bitte Berechtigung prüfen.");
@@ -593,43 +608,48 @@ export default function RealtimeChat() {
              setIsStartingSession(false);
         };
 
-        const tryDirectDeveloperStart = async () => {
-             console.log("Attempting direct developer start...");
+        const tryDirectStart = async () => {
+             console.log("Attempting direct start (non-research)...");
              setIsStartingSession(true);
+
+             const modeNow = useInterfaceStore.getState().appMode;
+             const isDemo = modeNow === 'demo';
 
              const currentMicStream = useMediaStore.getState().micStream || await requestMicrophoneAccess();
              let currentCameraStream = useMediaStore.getState().cameraStream;
-             if (!currentCameraStream && useInterfaceStore.getState().cameraPermission === 'granted') {
-                 // Corrected function name
-                 const camResult = await handleRequestCameraPermission();
-                 currentCameraStream = isMediaStream(camResult) ? camResult : null;
+             if (!isDemo) {
+                 if (!currentCameraStream && useInterfaceStore.getState().cameraPermission === 'granted') {
+                     const camResult = await handleRequestCameraPermission();
+                     currentCameraStream = isMediaStream(camResult) ? camResult : null;
+                 }
+             } else {
+                 currentCameraStream = null; // Demo-Modus: Kamera nicht verwenden
              }
 
              if (!currentMicStream) {
-                 console.log("Mikrofon für Dev-Start benötigt.");
+                 console.log("Mikrofon für Start benötigt.");
                  setIsStartingSession(false);
                  useSessionControlStore.getState().clearStartRequest();
                  return;
              }
 
-              const devConfig = { participantId: 'developer', topic: 'general', mode: 'General' };
-              const nullScreenStream: MediaStream | null = null;
-              await initiateSessionFromConfig(
-                  devConfig,
-                  false,
-                  currentMicStream,
-                  currentCameraStream,
-                  nullScreenStream
-              );
+             const cfg = { participantId: isDemo ? 'demo' : 'developer', topic: 'general', mode: 'General' };
+             await initiateSessionFromConfig(
+                 cfg,
+                 false,
+                 currentMicStream,
+                 currentCameraStream,
+                 null
+             );
 
              useSessionControlStore.getState().clearStartRequest();
              setIsStartingSession(false);
         };
 
-        if (config && mode === 'research') {
+        if (config && (mode === 'research' || mode === 'demo')) {
             tryStartSessionAfterOnboarding(config);
         } else if (directStart && mode === 'developer') {
-            tryDirectDeveloperStart();
+            tryDirectStart();
         }
         // Removed requestScreenPermission from dependencies
     }, [startRequestConfig, directStartRequested, clearStartRequest, initiateSessionFromConfig, requestMicrophoneAccess, handleRequestCameraPermission]);
@@ -637,7 +657,7 @@ export default function RealtimeChat() {
     // handleStartClick für ChatControls
     const handleStartClick = useCallback(() => {
         const currentAppMode = useInterfaceStore.getState().appMode;
-        if (currentAppMode === 'research') {
+        if (currentAppMode === 'research' || currentAppMode === 'demo') {
             useSessionControlStore.getState().openOnboarding();
         } else {
             useSessionControlStore.getState().requestDirectStart();
@@ -673,7 +693,14 @@ export default function RealtimeChat() {
         // Nur ausführen, wenn die Session explizit als "gerade beendet mit Nachrichten" markiert wurde,
         // die Aufnahme gestoppt ist und die Session getrennt ist.
         // UND der Feedback Survey NICHT angezeigt wird (um eine Endlosschleife zu vermeiden, falls der Survey selbst den Status ändert)
-        if (sessionJustEndedWithMessages && recordingStatus === 'stopped' && sessionStatus === 'DISCONNECTED' && !showFeedbackSurvey && !showThankYouMessage) {
+        if (
+            sessionJustEndedWithMessages &&
+            recordingStatus === 'stopped' &&
+            sessionStatus === 'DISCONNECTED' &&
+            !showFeedbackSurvey &&
+            !showThankYouMessage &&
+            useInterfaceStore.getState().appMode !== 'demo'
+        ) {
             console.log("[RealtimeChat] Download useEffect: Conditions met. Showing Feedback Survey.");
             // Zuerst den Survey anzeigen, anstatt direkt Downloads und Reset durchzuführen
             setShowFeedbackSurvey(true);
@@ -709,18 +736,18 @@ export default function RealtimeChat() {
         const minutes = swissTime.getMinutes().toString().padStart(2, '0');
         const formattedTimestamp = `${year}${month}${day}_${hours}${minutes}`;
         const transcriptFilename = `Transcript_${pIdForFilename}_${formattedTimestamp}.txt`;
-        if (formattedContent && currentTranscript.length > 0) {
+        if (formattedContent && currentTranscript.length > 0 && useInterfaceStore.getState().appMode !== 'demo') {
             console.log(`[RealtimeChat] Attempting to download transcript (after feedback): ${transcriptFilename}`);
             downloadTxtFile(formattedContent, transcriptFilename);
         } else {
             console.log("[RealtimeChat] Transcript download SKIPPED (after feedback). Conditions not met.");
         }
 
-        if (recordedData.combinedBlob) {
+        if (recordedData.combinedBlob && useInterfaceStore.getState().appMode !== 'demo') {
             const userMediaFilename = `User_${pIdForFilename}_${formattedTimestamp}.webm`;
             downloadFile(recordedData.combinedBlob, userMediaFilename);
         }
-        if (recordedData.assistantBlob) {
+        if (recordedData.assistantBlob && useInterfaceStore.getState().appMode !== 'demo') {
             const assistantAudioFilename = `Assistant_${pIdForFilename}_${formattedTimestamp}.webm`;
             downloadFile(recordedData.assistantBlob, assistantAudioFilename);
         }
@@ -769,7 +796,13 @@ export default function RealtimeChat() {
     const isMicPermissionGranted = micPermission === 'granted';
     const isCameraPermissionGranted = cameraPermission === 'granted';
 
-    const canStartSession = isMicPermissionGranted && isCameraPermissionGranted && (sessionStatus === 'DISCONNECTED' || sessionStatus === 'ERROR');
+    const canStartSession = (
+        sessionStatus === 'DISCONNECTED' || sessionStatus === 'ERROR'
+    ) && (
+        useInterfaceStore.getState().appMode === 'demo'
+            ? true
+            : (isMicPermissionGranted && isCameraPermissionGranted)
+    );
 
     const [helpLoading, setHelpLoading] = useState(false);
 

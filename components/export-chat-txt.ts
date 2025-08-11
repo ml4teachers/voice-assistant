@@ -98,3 +98,31 @@ export function downloadTxtFile(content: string, filename: string): void {
 
 // Die alte Funktion kann entfernt oder umbenannt werden, wenn sie nicht mehr direkt genutzt wird.
 // export function exportChatAsTxt() { ... }
+
+// Neue Hilfsfunktion: Exportiere aktuellen Chat als TXT ohne Survey-Antworten
+export function exportChatAsTxt(): void {
+  try {
+    const currentTranscript = useConversationStore.getState().chatMessages as ChatItem[];
+    if (!currentTranscript || currentTranscript.length === 0) {
+      console.warn("Kein Chatverlauf zum Exportieren vorhanden.");
+      return;
+    }
+
+    const formattedContent = formatDataForTxt(currentTranscript, null);
+
+    const now = new Date();
+    const swissTime = new Date(
+      now.toLocaleString("en-US", { timeZone: "Europe/Zurich" })
+    );
+    const year = swissTime.getFullYear();
+    const month = (swissTime.getMonth() + 1).toString().padStart(2, "0");
+    const day = swissTime.getDate().toString().padStart(2, "0");
+    const hours = swissTime.getHours().toString().padStart(2, "0");
+    const minutes = swissTime.getMinutes().toString().padStart(2, "0");
+    const filename = `Transcript_ManualExport_${year}${month}${day}_${hours}${minutes}.txt`;
+
+    downloadTxtFile(formattedContent, filename);
+  } catch (e) {
+    console.error("Fehler beim Export des Chatverlaufs als TXT:", e);
+  }
+}
