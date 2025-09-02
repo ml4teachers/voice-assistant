@@ -108,7 +108,7 @@ export async function createRealtimeConnection(
         await pc.setLocalDescription(offer);
         console.log("Offer created and set as local description.");
 
-        const model = "gpt-4o-mini-realtime-preview";
+        const model = "gpt-realtime";
         const sdpResponse = await fetch(`https://api.openai.com/v1/realtime?model=${model}`, {
             method: "POST",
             body: offer.sdp,
